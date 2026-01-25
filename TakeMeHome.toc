@@ -1,0 +1,8 @@
+## Interface: 120001, 120000
+## Title: TakeMeHome
+## Notes: Quick access to Hearthstones and travel options in a movable window
+## Author: Custom
+## Version: 1.0.0
+## SavedVariables: TakeMeHomeDB
+
+TakeMeHome.lua
