@@ -92,6 +92,9 @@ local defaults = {
     functionSettings = {
         logout = { enabled = true, order = 1 },
     },
+    -- Window snapping and linking
+    snapEnabled = true,
+    linkedWindows = {}, -- Groups of linked window keys, e.g., { {"main", "professions"}, {"mounts", "function"} }
 }
 
 -- Main frame
@@ -125,9 +128,330 @@ local UpdateProfessionButtons, UpdateMountButtons, UpdateFunctionButtons
 -- Track if user wants windows visible (used by minimap toggle)
 local userWantsWindowsVisible = true
 
+-- ============================================
+-- WINDOW SNAPPING AND LINKING SYSTEM
+-- ============================================
+
+-- Window registry (populated after all frames are created)
+local windowRegistry = {}
+local windowPositionKeys = {} -- Maps window key to position saved variable key
+
+-- Snap threshold in pixels
+local SNAP_THRESHOLD = 20
+
+-- Track drag start positions for linked window movement
+local dragStartPositions = {}
+
+-- Initialize window registry (called after all frames are created)
+-- Uses global frame names since local variables aren't in scope when this function is defined
+local function InitializeWindowRegistry()
+    windowRegistry = {
+        main = TakeMeHomeFrame,
+        professions = TakeMeHomeProfessions,
+        mounts = TakeMeHomeMountsFrame,
+        ["function"] = TakeMeHomeFunctionFrame,
+    }
+    windowPositionKeys = {
+        main = "position",
+        professions = "professionPosition",
+        mounts = "mountsPosition",
+        ["function"] = "functionPosition",
+    }
+end
+
+-- Get window bounds in screen coordinates
+-- Note: GetRect() already returns screen coordinates after scaling
+local function GetWindowBounds(frame)
+    if not frame or not frame:IsShown() then return nil end
+    local left, bottom, width, height = frame:GetRect()
+    if not left then return nil end
+    return {
+        left = left,
+        right = left + width,
+        top = bottom + height,
+        bottom = bottom,
+        width = width,
+        height = height,
+        frame = frame
+    }
+end
+
+-- Get window key from frame
+local function GetWindowKey(frame)
+    for key, f in pairs(windowRegistry) do
+        if f == frame then return key end
+    end
+    return nil
+end
+
+-- Get all windows in the same link group as the given key
+local function GetLinkedKeys(windowKey)
+    if not TakeMeHomeDB or not TakeMeHomeDB.linkedWindows then return { windowKey } end
+    for _, group in ipairs(TakeMeHomeDB.linkedWindows) do
+        for _, key in ipairs(group) do
+            if key == windowKey then
+                return group
+            end
+        end
+    end
+    return { windowKey }
+end
+
+-- Check if two windows are in the same link group
+local function AreWindowsLinked(key1, key2)
+    local group = GetLinkedKeys(key1)
+    for _, key in ipairs(group) do
+        if key == key2 then return true end
+    end
+    return false
+end
+
+-- Link two windows together (merges their groups)
+local function LinkWindows(key1, key2)
+    if not TakeMeHomeDB then return end
+    if not TakeMeHomeDB.linkedWindows then TakeMeHomeDB.linkedWindows = {} end
+
+    -- Find existing groups
+    local group1Idx, group2Idx = nil, nil
+    for i, group in ipairs(TakeMeHomeDB.linkedWindows) do
+        for _, key in ipairs(group) do
+            if key == key1 then group1Idx = i end
+            if key == key2 then group2Idx = i end
+        end
+    end
+
+    if group1Idx and group2Idx then
+        if group1Idx == group2Idx then return end -- Already in same group
+        -- Merge groups
+        for _, key in ipairs(TakeMeHomeDB.linkedWindows[group2Idx]) do
+            table.insert(TakeMeHomeDB.linkedWindows[group1Idx], key)
+        end
+        table.remove(TakeMeHomeDB.linkedWindows, group2Idx)
+    elseif group1Idx then
+        -- Add key2 to group1
+        table.insert(TakeMeHomeDB.linkedWindows[group1Idx], key2)
+    elseif group2Idx then
+        -- Add key1 to group2
+        table.insert(TakeMeHomeDB.linkedWindows[group2Idx], key1)
+    else
+        -- Create new group
+        table.insert(TakeMeHomeDB.linkedWindows, { key1, key2 })
+    end
+end
+
+-- Unlink a window from its group
+local function UnlinkWindow(windowKey)
+    if not TakeMeHomeDB or not TakeMeHomeDB.linkedWindows then return end
+    for i, group in ipairs(TakeMeHomeDB.linkedWindows) do
+        for j, key in ipairs(group) do
+            if key == windowKey then
+                table.remove(group, j)
+                -- Remove group if only one window left
+                if #group <= 1 then
+                    table.remove(TakeMeHomeDB.linkedWindows, i)
+                end
+                return
+            end
+        end
+    end
+end
+
+-- Check if a window is part of any link group
+local function IsWindowLinked(windowKey)
+    if not TakeMeHomeDB or not TakeMeHomeDB.linkedWindows then return false end
+    for _, group in ipairs(TakeMeHomeDB.linkedWindows) do
+        for _, key in ipairs(group) do
+            if key == windowKey then return true end
+        end
+    end
+    return false
+end
+
+-- Find snap target for a dragged frame
+-- Returns: targetKey, snapSide, snapX, snapY (or nil if no snap)
+local function FindSnapTarget(draggedFrame)
+    if not TakeMeHomeDB or not TakeMeHomeDB.snapEnabled then return nil end
+
+    local draggedKey = GetWindowKey(draggedFrame)
+    local draggedBounds = GetWindowBounds(draggedFrame)
+    if not draggedBounds then return nil end
+
+    local bestTarget = nil
+    local bestDistance = SNAP_THRESHOLD + 1
+    local bestSnapSide = nil
+    local bestSnapX, bestSnapY = nil, nil
+
+    for key, frame in pairs(windowRegistry) do
+        if key ~= draggedKey and frame:IsShown() then
+            local targetBounds = GetWindowBounds(frame)
+            if targetBounds then
+                -- Check right edge of dragged to left edge of target
+                local distRightToLeft = math.abs(draggedBounds.right - targetBounds.left)
+                local verticalOverlap = not (draggedBounds.bottom > targetBounds.top or draggedBounds.top < targetBounds.bottom)
+                if distRightToLeft < bestDistance and verticalOverlap then
+                    bestDistance = distRightToLeft
+                    bestTarget = key
+                    bestSnapSide = "right"
+                    -- Overlap by 1 pixel so borders blend together
+                    bestSnapX = targetBounds.left - draggedBounds.width + 1
+                    -- Align tops
+                    bestSnapY = targetBounds.top - draggedBounds.height
+                end
+
+                -- Check left edge of dragged to right edge of target
+                local distLeftToRight = math.abs(draggedBounds.left - targetBounds.right)
+                if distLeftToRight < bestDistance and verticalOverlap then
+                    bestDistance = distLeftToRight
+                    bestTarget = key
+                    bestSnapSide = "left"
+                    -- Overlap by 1 pixel so borders blend together
+                    bestSnapX = targetBounds.right - 1
+                    bestSnapY = targetBounds.top - draggedBounds.height
+                end
+
+                -- Check bottom edge of dragged to top edge of target
+                local distBottomToTop = math.abs(draggedBounds.bottom - targetBounds.top)
+                local horizontalOverlap = not (draggedBounds.right < targetBounds.left or draggedBounds.left > targetBounds.right)
+                if distBottomToTop < bestDistance and horizontalOverlap then
+                    bestDistance = distBottomToTop
+                    bestTarget = key
+                    bestSnapSide = "bottom"
+                    bestSnapX = targetBounds.left
+                    -- Overlap by 1 pixel so borders blend together
+                    bestSnapY = targetBounds.top - 1
+                end
+
+                -- Check top edge of dragged to bottom edge of target
+                local distTopToBottom = math.abs(draggedBounds.top - targetBounds.bottom)
+                if distTopToBottom < bestDistance and horizontalOverlap then
+                    bestDistance = distTopToBottom
+                    bestTarget = key
+                    bestSnapSide = "top"
+                    bestSnapX = targetBounds.left
+                    -- Overlap by 1 pixel so borders blend together
+                    bestSnapY = targetBounds.bottom - draggedBounds.height + 1
+                end
+            end
+        end
+    end
+
+    if bestDistance <= SNAP_THRESHOLD then
+        return bestTarget, bestSnapSide, bestSnapX, bestSnapY
+    end
+    return nil
+end
+
+-- Snap a frame to a position and link it to the target
+local function SnapAndLinkWindow(frame, targetKey, snapX, snapY)
+    local windowKey = GetWindowKey(frame)
+
+    -- snapX, snapY are in screen coordinates (from GetRect)
+    -- SetPoint with BOTTOMLEFT uses the same coordinate system
+    frame:ClearAllPoints()
+    frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", snapX, snapY)
+
+    -- Save position
+    local posKey = windowPositionKeys[windowKey]
+    if posKey and TakeMeHomeDB then
+        local point, _, _, px, py = frame:GetPoint()
+        TakeMeHomeDB[posKey] = { point = point, x = px, y = py }
+    end
+
+    -- Auto-link the windows
+    if windowKey and targetKey then
+        LinkWindows(windowKey, targetKey)
+        print("|cff00ff00TakeMeHome|r: Windows linked! They will now move together.")
+    end
+end
+
+-- Store start positions for linked window movement
+local function StoreDragStartPositions(primaryFrame)
+    wipe(dragStartPositions)
+    local primaryKey = GetWindowKey(primaryFrame)
+    if not primaryKey then return end
+
+    local linkedKeys = GetLinkedKeys(primaryKey)
+    for _, key in ipairs(linkedKeys) do
+        local frame = windowRegistry[key]
+        if frame and frame:IsShown() then
+            -- Store screen position using GetRect for consistency
+            local left, bottom = frame:GetRect()
+            dragStartPositions[key] = { left = left, bottom = bottom }
+        end
+    end
+end
+
+-- Move all linked windows by the same delta (called during drag via OnUpdate)
+local function MoveLinkedWindowsDuringDrag(primaryFrame)
+    local primaryKey = GetWindowKey(primaryFrame)
+    if not primaryKey then return end
+
+    -- Get primary frame's current position
+    local primaryLeft, primaryBottom = primaryFrame:GetRect()
+    local primaryStart = dragStartPositions[primaryKey]
+    if not primaryStart then return end
+
+    -- Calculate how much the primary frame actually moved
+    local deltaX = primaryLeft - primaryStart.left
+    local deltaY = primaryBottom - primaryStart.bottom
+
+    -- Move all linked windows (except primary which moved itself)
+    local linkedKeys = GetLinkedKeys(primaryKey)
+    for _, key in ipairs(linkedKeys) do
+        if key ~= primaryKey then
+            local frame = windowRegistry[key]
+            local startPos = dragStartPositions[key]
+            if frame and startPos then
+                -- Calculate new position
+                local newLeft = startPos.left + deltaX
+                local newBottom = startPos.bottom + deltaY
+
+                frame:ClearAllPoints()
+                frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", newLeft, newBottom)
+            end
+        end
+    end
+end
+
+-- Save positions of all linked windows (called at end of drag)
+local function SaveLinkedWindowPositions(primaryFrame)
+    local primaryKey = GetWindowKey(primaryFrame)
+    if not primaryKey then return end
+
+    local linkedKeys = GetLinkedKeys(primaryKey)
+    for _, key in ipairs(linkedKeys) do
+        local frame = windowRegistry[key]
+        if frame then
+            local posKey = windowPositionKeys[key]
+            if posKey and TakeMeHomeDB then
+                local point, _, _, x, y = frame:GetPoint()
+                TakeMeHomeDB[posKey] = { point = point, x = x, y = y }
+            end
+        end
+    end
+end
+
+-- Start dragging with linked window updates
+local function StartLinkedDrag(primaryFrame)
+    StoreDragStartPositions(primaryFrame)
+    primaryFrame:StartMoving()
+
+    -- Set up OnUpdate to move linked windows during drag
+    primaryFrame:SetScript("OnUpdate", function(self)
+        MoveLinkedWindowsDuringDrag(self)
+    end)
+end
+
+-- Stop dragging and clean up
+local function StopLinkedDrag(primaryFrame)
+    primaryFrame:StopMovingOrSizing()
+    primaryFrame:SetScript("OnUpdate", nil)
+    SaveLinkedWindowPositions(primaryFrame)
+end
+
 -- Custom context menu frame (modern style)
 local bannerMenu = CreateFrame("Frame", "TakeMeHomeBannerMenu", UIParent, "BackdropTemplate")
-bannerMenu:SetSize(110, 68)
+bannerMenu:SetSize(110, 88)  -- Larger to fit Unlink button
 bannerMenu:SetFrameStrata("TOOLTIP")
 bannerMenu:SetBackdrop({
     bgFile = "Interface\\BUTTONS\\WHITE8X8",
@@ -139,6 +463,7 @@ bannerMenu:SetBackdropColor(0.1, 0.1, 0.12, 0.95)
 bannerMenu:SetBackdropBorderColor(0.4, 0.4, 0.45, 1)
 bannerMenu:EnableMouse(true)
 bannerMenu:Hide()
+bannerMenu.sourceFrame = nil  -- Track which frame opened the menu
 
 -- Lock/Unlock button
 local lockButton = CreateFrame("Button", nil, bannerMenu)
@@ -186,10 +511,33 @@ settingsButton:SetScript("OnClick", function()
     end)
 end)
 
+-- Unlink Window button
+local unlinkButton = CreateFrame("Button", nil, bannerMenu)
+unlinkButton:SetSize(100, 18)
+unlinkButton:SetPoint("TOP", settingsButton, "BOTTOM", 0, -2)
+unlinkButton:SetNormalFontObject("GameFontNormalSmall")
+unlinkButton:SetHighlightFontObject("GameFontHighlightSmall")
+unlinkButton:SetText("Unlink Window")
+
+local unlinkHighlight = unlinkButton:CreateTexture(nil, "HIGHLIGHT")
+unlinkHighlight:SetAllPoints()
+unlinkHighlight:SetColorTexture(1, 0.6, 0.3, 0.3)
+
+unlinkButton:SetScript("OnClick", function()
+    if bannerMenu.sourceFrame then
+        local windowKey = GetWindowKey(bannerMenu.sourceFrame)
+        if windowKey then
+            UnlinkWindow(windowKey)
+            print("|cff00ff00TakeMeHome|r: Window unlinked.")
+        end
+    end
+    bannerMenu:Hide()
+end)
+
 -- Cancel button
 local cancelButton = CreateFrame("Button", nil, bannerMenu)
 cancelButton:SetSize(100, 18)
-cancelButton:SetPoint("TOP", settingsButton, "BOTTOM", 0, -2)
+cancelButton:SetPoint("TOP", unlinkButton, "BOTTOM", 0, -2)
 cancelButton:SetNormalFontObject("GameFontNormalSmall")
 cancelButton:SetHighlightFontObject("GameFontHighlightSmall")
 cancelButton:SetText("Cancel")
@@ -206,18 +554,39 @@ end)
 bannerMenu:SetScript("OnShow", function(self)
     -- Update lock button text
     lockButton:SetText(TakeMeHomeDB.locked and "Unlock Windows" or "Lock Windows")
+
+    -- Show/hide unlink button based on whether window is linked
+    if self.sourceFrame then
+        local windowKey = GetWindowKey(self.sourceFrame)
+        if windowKey and IsWindowLinked(windowKey) then
+            unlinkButton:Show()
+            cancelButton:SetPoint("TOP", unlinkButton, "BOTTOM", 0, -2)
+            self:SetHeight(88)
+        else
+            unlinkButton:Hide()
+            cancelButton:SetPoint("TOP", settingsButton, "BOTTOM", 0, -2)
+            self:SetHeight(68)
+        end
+    else
+        unlinkButton:Hide()
+        cancelButton:SetPoint("TOP", settingsButton, "BOTTOM", 0, -2)
+        self:SetHeight(68)
+    end
 end)
 
 bannerMenu:SetScript("OnLeave", function(self)
     -- Small delay before hiding to allow clicking buttons
     C_Timer.After(0.1, function()
-        if not bannerMenu:IsMouseOver() and not lockButton:IsMouseOver() and not settingsButton:IsMouseOver() and not cancelButton:IsMouseOver() then
+        if not bannerMenu:IsMouseOver() and not lockButton:IsMouseOver() and not settingsButton:IsMouseOver() and not unlinkButton:IsMouseOver() and not cancelButton:IsMouseOver() then
             bannerMenu:Hide()
         end
     end)
 end)
 
 local function ShowBannerContextMenu(anchor)
+    -- Store source frame (anchor's parent is the window frame)
+    bannerMenu.sourceFrame = anchor:GetParent()
+
     -- Position at cursor
     local x, y = GetCursorPosition()
     local scale = UIParent:GetEffectiveScale()
@@ -240,14 +609,25 @@ mainBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
 
 mainDragBanner:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        mainFrame:StartMoving()
+        StartLinkedDrag(mainFrame)
     end
 end)
 
 mainDragBanner:SetScript("OnDragStop", function(self)
-    mainFrame:StopMovingOrSizing()
+    StopLinkedDrag(mainFrame)
+
+    -- Save primary window position
     local point, _, _, x, y = mainFrame:GetPoint()
     TakeMeHomeDB.position = { point = point, x = x, y = y }
+
+    -- Check for snap target (only if not already linked to avoid re-linking)
+    local windowKey = GetWindowKey(mainFrame)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(mainFrame)
+        if targetKey then
+            SnapAndLinkWindow(mainFrame, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Right-click to show menu
@@ -273,14 +653,25 @@ end)
 -- Drag functionality for main frame
 mainFrame:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        self:StartMoving()
+        StartLinkedDrag(self)
     end
 end)
 
 mainFrame:SetScript("OnDragStop", function(self)
-    self:StopMovingOrSizing()
+    StopLinkedDrag(self)
+
+    -- Save primary window position
     local point, _, _, x, y = self:GetPoint()
     TakeMeHomeDB.position = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(self)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(self)
+        if targetKey then
+            SnapAndLinkWindow(self, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Container for buttons (offset for drag banner when unlocked)
@@ -1052,12 +1443,23 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             TakeMeHomeDB.functionSettings = CopyTable(defaults.functionSettings)
         end
 
+        -- Ensure snap/link settings exist
+        if TakeMeHomeDB.snapEnabled == nil then
+            TakeMeHomeDB.snapEnabled = defaults.snapEnabled
+        end
+        if not TakeMeHomeDB.linkedWindows then
+            TakeMeHomeDB.linkedWindows = {}
+        end
+
         -- Ensure all button keys exist
         for key, defaultSettings in pairs(defaults.buttonSettings) do
             if not TakeMeHomeDB.buttonSettings[key] then
                 TakeMeHomeDB.buttonSettings[key] = CopyTable(defaultSettings)
             end
         end
+
+        -- Initialize window registry for snapping/linking
+        InitializeWindowRegistry()
 
         -- Restore position
         local pos = TakeMeHomeDB.position
@@ -1848,14 +2250,25 @@ profBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
 
 profDragBanner:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        professionFrame:StartMoving()
+        StartLinkedDrag(professionFrame)
     end
 end)
 
 profDragBanner:SetScript("OnDragStop", function(self)
-    professionFrame:StopMovingOrSizing()
+    StopLinkedDrag(professionFrame)
+
+    -- Save primary window position
     local point, _, _, x, y = professionFrame:GetPoint()
     TakeMeHomeDB.professionPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(professionFrame)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(professionFrame)
+        if targetKey then
+            SnapAndLinkWindow(professionFrame, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Right-click to show menu
@@ -1881,14 +2294,25 @@ end)
 -- Drag functionality
 professionFrame:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        self:StartMoving()
+        StartLinkedDrag(self)
     end
 end)
 
 professionFrame:SetScript("OnDragStop", function(self)
-    self:StopMovingOrSizing()
+    StopLinkedDrag(self)
+
+    -- Save primary window position
     local point, _, _, x, y = self:GetPoint()
     TakeMeHomeDB.professionPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(self)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(self)
+        if targetKey then
+            SnapAndLinkWindow(self, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Container for profession buttons (offset for drag banner)
@@ -2110,14 +2534,25 @@ mountsBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
 
 mountsDragBanner:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        mountsFrame:StartMoving()
+        StartLinkedDrag(mountsFrame)
     end
 end)
 
 mountsDragBanner:SetScript("OnDragStop", function(self)
-    mountsFrame:StopMovingOrSizing()
+    StopLinkedDrag(mountsFrame)
+
+    -- Save primary window position
     local point, _, _, x, y = mountsFrame:GetPoint()
     TakeMeHomeDB.mountsPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(mountsFrame)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(mountsFrame)
+        if targetKey then
+            SnapAndLinkWindow(mountsFrame, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Right-click to show menu
@@ -2143,14 +2578,25 @@ end)
 -- Drag functionality
 mountsFrame:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        self:StartMoving()
+        StartLinkedDrag(self)
     end
 end)
 
 mountsFrame:SetScript("OnDragStop", function(self)
-    self:StopMovingOrSizing()
+    StopLinkedDrag(self)
+
+    -- Save primary window position
     local point, _, _, x, y = self:GetPoint()
     TakeMeHomeDB.mountsPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(self)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(self)
+        if targetKey then
+            SnapAndLinkWindow(self, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Container for mount buttons
@@ -2349,14 +2795,25 @@ funcBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
 
 funcDragBanner:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        functionFrame:StartMoving()
+        StartLinkedDrag(functionFrame)
     end
 end)
 
 funcDragBanner:SetScript("OnDragStop", function(self)
-    functionFrame:StopMovingOrSizing()
+    StopLinkedDrag(functionFrame)
+
+    -- Save primary window position
     local point, _, _, x, y = functionFrame:GetPoint()
     TakeMeHomeDB.functionPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(functionFrame)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(functionFrame)
+        if targetKey then
+            SnapAndLinkWindow(functionFrame, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Right-click to show menu
@@ -2382,14 +2839,25 @@ end)
 -- Drag functionality
 functionFrame:SetScript("OnDragStart", function(self)
     if not TakeMeHomeDB.locked then
-        self:StartMoving()
+        StartLinkedDrag(self)
     end
 end)
 
 functionFrame:SetScript("OnDragStop", function(self)
-    self:StopMovingOrSizing()
+    StopLinkedDrag(self)
+
+    -- Save primary window position
     local point, _, _, x, y = self:GetPoint()
     TakeMeHomeDB.functionPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(self)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(self)
+        if targetKey then
+            SnapAndLinkWindow(self, targetKey, snapX, snapY)
+        end
+    end
 end)
 
 -- Container for function buttons
