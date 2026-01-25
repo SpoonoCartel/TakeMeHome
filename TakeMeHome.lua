@@ -44,12 +44,6 @@ local MAILBOX_TOYS = {
     { itemID = 156833, name = "Katy's Stampwhistle" },
 }
 
--- Utility Mounts (defined here so it's available during PLAYER_LOGIN)
-local UTILITY_MOUNTS = {
-    { spellID = 264058, name = "Mighty Caravan Brutosaur", key = "mighty_caravan_brutosaur" },
-    { spellID = 122708, name = "Grand Expedition Yak", key = "grand_expedition_yak" },
-}
-
 -- Warband Bank Spell
 local WARBAND_BANK_SPELL = { name = "Warband Bank Distance Inhibitor" }
 
@@ -88,9 +82,11 @@ local defaults = {
         -- Will be populated dynamically based on learned professions
         -- Format: ["professionName"] = { enabled = true, order = 1 }
     },
-    mountSettings = {
-        mighty_caravan_brutosaur = { enabled = true, order = 1 },
-        grand_expedition_yak = { enabled = true, order = 2 },
+    selectedMounts = {
+        -- User-selected mounts (max 6)
+        -- Format: { spellID = 264058 }
+        { spellID = 264058 },  -- Mighty Caravan Brutosaur
+        { spellID = 122708 },  -- Grand Expedition Yak
     },
 }
 
@@ -401,20 +397,6 @@ end
 local function GetButtonOrder(key)
     if not TakeMeHomeDB or not TakeMeHomeDB.buttonSettings then return 99 end
     local settings = TakeMeHomeDB.buttonSettings[key]
-    return settings and settings.order or 99
-end
-
--- Helper function to check if a mount is enabled in settings
-local function IsMountEnabled(key)
-    if not TakeMeHomeDB or not TakeMeHomeDB.mountSettings then return true end
-    local settings = TakeMeHomeDB.mountSettings[key]
-    return settings and settings.enabled
-end
-
--- Helper function to get mount order
-local function GetMountOrder(key)
-    if not TakeMeHomeDB or not TakeMeHomeDB.mountSettings then return 99 end
-    local settings = TakeMeHomeDB.mountSettings[key]
     return settings and settings.order or 99
 end
 
@@ -1049,16 +1031,9 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             TakeMeHomeDB.professionSettings = {}
         end
 
-        -- Ensure mountSettings exists
-        if not TakeMeHomeDB.mountSettings then
-            TakeMeHomeDB.mountSettings = CopyTable(defaults.mountSettings)
-        end
-
-        -- Ensure all mount keys exist
-        for _, mountData in ipairs(UTILITY_MOUNTS) do
-            if not TakeMeHomeDB.mountSettings[mountData.key] then
-                TakeMeHomeDB.mountSettings[mountData.key] = { enabled = true, order = 99 }
-            end
+        -- Ensure selectedMounts exists
+        if not TakeMeHomeDB.selectedMounts then
+            TakeMeHomeDB.selectedMounts = CopyTable(defaults.selectedMounts)
         end
 
         -- Ensure all button keys exist
@@ -1508,6 +1483,9 @@ local function CreateConfigPanel()
     -- =====================
     -- MOUNTS TAB CONTENT
     -- =====================
+    local mountSearchResults = {}
+    local maxMounts = 6
+
     local function RefreshMountsTab()
         -- Clear existing children
         for _, child in ipairs({mountsContent:GetChildren()}) do
@@ -1515,111 +1493,194 @@ local function CreateConfigPanel()
             child:SetParent(nil)
         end
 
-        -- Build list of all utility mounts with ownership info
-        local mountsList = {}
-        for i, mountData in ipairs(UTILITY_MOUNTS) do
-            local name, icon, isCollected = GetMountInfoBySpellID(mountData.spellID)
-            table.insert(mountsList, {
-                data = mountData,
-                name = name or mountData.name,
-                icon = icon,
-                isCollected = isCollected,
-                order = GetMountOrder(mountData.key)
-            })
-        end
-
-        -- Sort by order
-        table.sort(mountsList, function(a, b) return a.order < b.order end)
-
-        if #mountsList == 0 then
-            local noMounts = mountsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            noMounts:SetPoint("CENTER")
-            noMounts:SetText("No utility mounts configured")
-            noMounts:SetTextColor(0.5, 0.5, 0.5)
-            return
-        end
-
+        local selectedMounts = TakeMeHomeDB.selectedMounts or {}
         local yOffset = 0
-        for i, mountInfo in ipairs(mountsList) do
-            local row = CreateFrame("Frame", nil, mountsContent, "BackdropTemplate")
-            row:SetSize(300, 30)
-            row:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
 
+        -- Header: Selected Mounts (X/6)
+        local header = mountsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
+        header:SetText(string.format("Selected Mounts (%d/%d)", #selectedMounts, maxMounts))
+        header:SetTextColor(0.4, 0.6, 1)
+        yOffset = yOffset - 20
+
+        -- Show selected mounts
+        for i, mountEntry in ipairs(selectedMounts) do
+            local name, icon, isCollected = GetMountInfoBySpellID(mountEntry.spellID)
+
+            local row = CreateFrame("Frame", nil, mountsContent, "BackdropTemplate")
+            row:SetSize(300, 26)
+            row:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
             row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
             row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
 
-            local checkbox = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-            checkbox:SetPoint("LEFT", row, "LEFT", 5, 0)
-            checkbox:SetChecked(IsMountEnabled(mountInfo.data.key))
-            checkbox.mountKey = mountInfo.data.key
-
-            checkbox:SetScript("OnClick", function(self)
-                TakeMeHomeDB.mountSettings[self.mountKey].enabled = self:GetChecked()
-                UpdateMountButtons()
-            end)
-
             -- Icon
-            local icon = row:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(20, 20)
-            icon:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
-            if mountInfo.icon then
-                icon:SetTexture(mountInfo.icon)
-            end
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            if not mountInfo.isCollected then
-                icon:SetDesaturated(true)
-            end
+            local iconTex = row:CreateTexture(nil, "ARTWORK")
+            iconTex:SetSize(20, 20)
+            iconTex:SetPoint("LEFT", row, "LEFT", 5, 0)
+            if icon then iconTex:SetTexture(icon) end
+            iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            if not isCollected then iconTex:SetDesaturated(true) end
 
-            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            label:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+            -- Name
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            label:SetPoint("LEFT", iconTex, "RIGHT", 5, 0)
             label:SetWidth(140)
             label:SetJustifyH("LEFT")
-            label:SetText(mountInfo.name)
-            if not mountInfo.isCollected then
-                label:SetTextColor(0.5, 0.5, 0.5)
-            end
+            label:SetText(name or "Unknown Mount")
+            if not isCollected then label:SetTextColor(0.5, 0.5, 0.5) end
 
-            -- Up/Down buttons
-            local downBtn = CreateModernButton(row, 24, "v")
-            downBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            downBtn.mountKey = mountInfo.data.key
+            -- Remove button
+            local removeBtn = CreateModernButton(row, 20, "x")
+            removeBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+            removeBtn.index = i
+            removeBtn:SetScript("OnClick", function(self)
+                table.remove(TakeMeHomeDB.selectedMounts, self.index)
+                UpdateMountButtons()
+                RefreshMountsTab()
+            end)
+
+            -- Down button
+            local downBtn = CreateModernButton(row, 20, "v")
+            downBtn:SetPoint("RIGHT", removeBtn, "LEFT", -2, 0)
             downBtn.index = i
-            downBtn.mountsList = mountsList
+            downBtn:SetScript("OnClick", function(self)
+                if self.index < #TakeMeHomeDB.selectedMounts then
+                    local temp = TakeMeHomeDB.selectedMounts[self.index]
+                    TakeMeHomeDB.selectedMounts[self.index] = TakeMeHomeDB.selectedMounts[self.index + 1]
+                    TakeMeHomeDB.selectedMounts[self.index + 1] = temp
+                    UpdateMountButtons()
+                    RefreshMountsTab()
+                end
+            end)
 
-            local upBtn = CreateModernButton(row, 24, "^")
-            upBtn:SetPoint("RIGHT", downBtn, "LEFT", -4, 0)
-            upBtn.mountKey = mountInfo.data.key
+            -- Up button
+            local upBtn = CreateModernButton(row, 20, "^")
+            upBtn:SetPoint("RIGHT", downBtn, "LEFT", -2, 0)
             upBtn.index = i
-            upBtn.mountsList = mountsList
-
             upBtn:SetScript("OnClick", function(self)
                 if self.index > 1 then
-                    local currentKey = self.mountKey
-                    local prevKey = self.mountsList[self.index - 1].data.key
-                    local currentOrder = TakeMeHomeDB.mountSettings[currentKey].order
-                    local prevOrder = TakeMeHomeDB.mountSettings[prevKey].order
-                    TakeMeHomeDB.mountSettings[currentKey].order = prevOrder
-                    TakeMeHomeDB.mountSettings[prevKey].order = currentOrder
+                    local temp = TakeMeHomeDB.selectedMounts[self.index]
+                    TakeMeHomeDB.selectedMounts[self.index] = TakeMeHomeDB.selectedMounts[self.index - 1]
+                    TakeMeHomeDB.selectedMounts[self.index - 1] = temp
                     UpdateMountButtons()
                     RefreshMountsTab()
                 end
             end)
 
-            downBtn:SetScript("OnClick", function(self)
-                if self.index < #self.mountsList then
-                    local currentKey = self.mountKey
-                    local nextKey = self.mountsList[self.index + 1].data.key
-                    local currentOrder = TakeMeHomeDB.mountSettings[currentKey].order
-                    local nextOrder = TakeMeHomeDB.mountSettings[nextKey].order
-                    TakeMeHomeDB.mountSettings[currentKey].order = nextOrder
-                    TakeMeHomeDB.mountSettings[nextKey].order = currentOrder
-                    UpdateMountButtons()
-                    RefreshMountsTab()
-                end
-            end)
-
-            yOffset = yOffset - 32
+            yOffset = yOffset - 28
         end
+
+        -- Spacer
+        yOffset = yOffset - 10
+
+        -- Search section header
+        local searchHeader = mountsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        searchHeader:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
+        searchHeader:SetText("Add Mount (search your collection)")
+        searchHeader:SetTextColor(0.4, 0.6, 1)
+        yOffset = yOffset - 20
+
+        -- Search box
+        local searchBox = CreateFrame("EditBox", "TakeMeHomeMountSearch", mountsContent, "InputBoxTemplate")
+        searchBox:SetSize(200, 20)
+        searchBox:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 5, yOffset)
+        searchBox:SetAutoFocus(false)
+        searchBox:SetMaxLetters(50)
+
+        -- Search results container
+        local resultsContainer = CreateFrame("Frame", nil, mountsContent)
+        resultsContainer:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset - 25)
+        resultsContainer:SetSize(300, 150)
+
+        local function DisplaySearchResults(searchText)
+            -- Clear previous results
+            for _, child in ipairs({resultsContainer:GetChildren()}) do
+                child:Hide()
+                child:SetParent(nil)
+            end
+
+            if not searchText or searchText == "" then return end
+
+            searchText = searchText:lower()
+            local results = {}
+            local mountIDs = C_MountJournal.GetMountIDs()
+
+            for _, mountID in ipairs(mountIDs) do
+                local name, spellID, icon, _, isUsable, _, _, _, _, _, isCollected = C_MountJournal.GetMountInfoByID(mountID)
+                if isCollected and name and name:lower():find(searchText, 1, true) then
+                    -- Check if not already selected
+                    local alreadySelected = false
+                    for _, sel in ipairs(TakeMeHomeDB.selectedMounts) do
+                        if sel.spellID == spellID then
+                            alreadySelected = true
+                            break
+                        end
+                    end
+                    if not alreadySelected then
+                        table.insert(results, { name = name, spellID = spellID, icon = icon, mountID = mountID })
+                    end
+                end
+                if #results >= 5 then break end  -- Limit results
+            end
+
+            local resY = 0
+            for i, result in ipairs(results) do
+                local row = CreateFrame("Frame", nil, resultsContainer, "BackdropTemplate")
+                row:SetSize(295, 24)
+                row:SetPoint("TOPLEFT", resultsContainer, "TOPLEFT", 0, resY)
+                row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
+                row:SetBackdropColor(0.15, 0.15, 0.18, 0.8)
+
+                local iconTex = row:CreateTexture(nil, "ARTWORK")
+                iconTex:SetSize(18, 18)
+                iconTex:SetPoint("LEFT", row, "LEFT", 5, 0)
+                iconTex:SetTexture(result.icon)
+                iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+                local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                label:SetPoint("LEFT", iconTex, "RIGHT", 5, 0)
+                label:SetWidth(180)
+                label:SetJustifyH("LEFT")
+                label:SetText(result.name)
+
+                -- Add button
+                local addBtn = CreateModernButton(row, 30, "+")
+                addBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+                addBtn.spellID = result.spellID
+                addBtn:SetScript("OnClick", function(self)
+                    if #TakeMeHomeDB.selectedMounts >= maxMounts then
+                        print("|cff00ff00TakeMeHome|r: Maximum of " .. maxMounts .. " mounts reached.")
+                        return
+                    end
+                    table.insert(TakeMeHomeDB.selectedMounts, { spellID = self.spellID })
+                    UpdateMountButtons()
+                    searchBox:SetText("")
+                    RefreshMountsTab()
+                end)
+
+                resY = resY - 26
+            end
+
+            if #results == 0 and searchText ~= "" then
+                local noResults = resultsContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                noResults:SetPoint("TOPLEFT", resultsContainer, "TOPLEFT", 5, 0)
+                noResults:SetText("No matching mounts found")
+                noResults:SetTextColor(0.5, 0.5, 0.5)
+            end
+        end
+
+        searchBox:SetScript("OnTextChanged", function(self)
+            DisplaySearchResults(self:GetText())
+        end)
+
+        searchBox:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+        end)
+
+        searchBox:SetScript("OnEscapePressed", function(self)
+            self:SetText("")
+            self:ClearFocus()
+        end)
     end
 
     -- Refresh mounts when tab is shown
@@ -2065,50 +2126,42 @@ UpdateMountButtons = function()
     end
     wipe(mountButtons)
 
-    -- Build list of owned and enabled mounts with their order
-    local sortedMounts = {}
-    for i, mountData in ipairs(UTILITY_MOUNTS) do
-        local name, icon, isCollected, isUsable, mountID = GetMountInfoBySpellID(mountData.spellID)
-        -- Only include if player has the mount AND it's enabled in settings
-        if isCollected and IsMountEnabled(mountData.key) then
-            table.insert(sortedMounts, {
-                mountData = mountData,
-                name = name,
-                icon = icon,
-                isCollected = isCollected,
-                mountID = mountID,
-                order = GetMountOrder(mountData.key)
-            })
-        end
-    end
-
-    -- Sort by order
-    table.sort(sortedMounts, function(a, b) return a.order < b.order end)
+    -- Get selected mounts from saved variables
+    local selectedMounts = TakeMeHomeDB and TakeMeHomeDB.selectedMounts or {}
 
     local visibleCount = 0
+    local maxMounts = 6
 
-    for _, mountInfo in ipairs(sortedMounts) do
-        local button = CreateMountButton(mountInfo.mountData, mountInfo.name)
-        table.insert(mountButtons, button)
+    for i, mountEntry in ipairs(selectedMounts) do
+        if visibleCount >= maxMounts then break end
 
-        button.isCollected = mountInfo.isCollected
-        button.mountID = mountInfo.mountID
+        local name, icon, isCollected, isUsable, mountID = GetMountInfoBySpellID(mountEntry.spellID)
 
-        -- Set icon
-        if mountInfo.icon then
-            button.icon:SetTexture(mountInfo.icon)
-        else
-            -- Fallback icon
-            button.icon:SetTexture(GetSpellTexture(mountInfo.mountData.spellID))
+        -- Only show if player owns the mount
+        if isCollected then
+            local mountData = { spellID = mountEntry.spellID, name = name or "Unknown Mount" }
+            local button = CreateMountButton(mountData, name)
+            table.insert(mountButtons, button)
+
+            button.isCollected = isCollected
+            button.mountID = mountID
+            button.spellID = mountEntry.spellID
+
+            -- Set icon
+            if icon then
+                button.icon:SetTexture(icon)
+            else
+                button.icon:SetTexture(GetSpellTexture(mountEntry.spellID))
+            end
+
+            -- Position
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", mountsButtonContainer, "TOPLEFT",
+                visibleCount * (mountButtonSize + mountButtonSpacing), 0)
+            button:Show()
+
+            visibleCount = visibleCount + 1
         end
-
-        -- Position
-        button:ClearAllPoints()
-        button:SetPoint("TOPLEFT", mountsButtonContainer, "TOPLEFT",
-            visibleCount * (mountButtonSize + mountButtonSpacing), 0)
-        button:Show()
-
-        visibleCount = visibleCount + 1
     end
 
     -- Resize frame based on visible mounts
