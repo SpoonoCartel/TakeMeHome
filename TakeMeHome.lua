@@ -67,6 +67,7 @@ local defaults = {
     position = { point = "CENTER", x = 0, y = 0 },
     professionPosition = { point = "CENTER", x = 100, y = 0 },
     mountsPosition = { point = "CENTER", x = -100, y = 0 },
+    functionPosition = { point = "CENTER", x = 0, y = -100 },
     locked = false,
     scale = 0.75,
     minimapPos = 220, -- Angle around minimap
@@ -87,6 +88,9 @@ local defaults = {
         -- Format: { spellID = 264058 }
         { spellID = 264058 },  -- Mighty Caravan Brutosaur
         { spellID = 122708 },  -- Grand Expedition Yak
+    },
+    functionSettings = {
+        logout = { enabled = true, order = 1 },
     },
 }
 
@@ -114,8 +118,9 @@ mainFrame:SetBackdropBorderColor(0.3, 0.3, 0.35, 0.8)
 mainFrame:SetScale(0.75)
 
 -- Forward declarations for banner update functions and initialization
-local UpdateMainDragBanner, UpdateProfDragBanner, UpdateMountsDragBanner, InitializeProfessions, InitializeMounts
-local UpdateProfessionButtons, UpdateMountButtons
+local UpdateMainDragBanner, UpdateProfDragBanner, UpdateMountsDragBanner, UpdateFuncDragBanner
+local InitializeProfessions, InitializeMounts, InitializeFunction
+local UpdateProfessionButtons, UpdateMountButtons, UpdateFunctionButtons
 
 -- Track if user wants windows visible (used by minimap toggle)
 local userWantsWindowsVisible = true
@@ -152,6 +157,7 @@ lockButton:SetScript("OnClick", function()
     UpdateMainDragBanner()
     UpdateProfDragBanner()
     UpdateMountsDragBanner()
+    if UpdateFuncDragBanner then UpdateFuncDragBanner() end
     bannerMenu:Hide()
     if TakeMeHomeDB.locked then
         print("|cff00ff00TakeMeHome|r: Windows locked.")
@@ -1036,6 +1042,16 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             TakeMeHomeDB.selectedMounts = CopyTable(defaults.selectedMounts)
         end
 
+        -- Ensure functionPosition exists
+        if not TakeMeHomeDB.functionPosition then
+            TakeMeHomeDB.functionPosition = CopyTable(defaults.functionPosition)
+        end
+
+        -- Ensure functionSettings exists
+        if not TakeMeHomeDB.functionSettings then
+            TakeMeHomeDB.functionSettings = CopyTable(defaults.functionSettings)
+        end
+
         -- Ensure all button keys exist
         for key, defaultSettings in pairs(defaults.buttonSettings) do
             if not TakeMeHomeDB.buttonSettings[key] then
@@ -1056,6 +1072,9 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
 
         -- Initialize mounts window
         InitializeMounts()
+
+        -- Initialize function window
+        InitializeFunction()
 
         -- Initial update
         C_Timer.After(1, UpdateAllButtons)
@@ -1230,13 +1249,18 @@ local function CreateConfigPanel()
     mountsContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
     mountsContent:Hide()
 
-    local contentFrames = { travelContent, professionsContent, mountsContent }
+    local functionContent = CreateFrame("Frame", nil, configFrame)
+    functionContent:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -65)
+    functionContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
+    functionContent:Hide()
+
+    local contentFrames = { travelContent, professionsContent, mountsContent, functionContent }
     local tabButtons = {}
 
     -- Create tab button helper
     local function CreateTabButton(parent, text, index)
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(100, 24)
+        btn:SetSize(75, 24)
         btn:SetBackdrop({
             bgFile = "Interface\\BUTTONS\\WHITE8X8",
             edgeFile = "Interface\\BUTTONS\\WHITE8X8",
@@ -1300,6 +1324,10 @@ local function CreateConfigPanel()
     local mountsTab = CreateTabButton(tabContainer, "Mounts", 3)
     mountsTab:SetPoint("LEFT", professionsTab, "RIGHT", 5, 0)
     table.insert(tabButtons, mountsTab)
+
+    local functionTab = CreateTabButton(tabContainer, "Function", 4)
+    functionTab:SetPoint("LEFT", mountsTab, "RIGHT", 5, 0)
+    table.insert(tabButtons, functionTab)
 
     -- =====================
     -- TRAVEL TAB CONTENT
@@ -1487,10 +1515,15 @@ local function CreateConfigPanel()
     local maxMounts = 6
 
     local function RefreshMountsTab()
-        -- Clear existing children
+        -- Clear existing children (frames)
         for _, child in ipairs({mountsContent:GetChildren()}) do
             child:Hide()
             child:SetParent(nil)
+        end
+        -- Clear existing regions (fontstrings, textures)
+        for _, region in ipairs({mountsContent:GetRegions()}) do
+            region:Hide()
+            region:SetParent(nil)
         end
 
         local selectedMounts = TakeMeHomeDB.selectedMounts or {}
@@ -1511,7 +1544,7 @@ local function CreateConfigPanel()
             row:SetSize(300, 26)
             row:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
             row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-            row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
+            row:SetBackdropColor(0.08, 0.08, 0.1, (i % 2 == 0) and 0.95 or 0.85)
 
             -- Icon
             local iconTex = row:CreateTexture(nil, "ARTWORK")
@@ -1570,26 +1603,32 @@ local function CreateConfigPanel()
             yOffset = yOffset - 28
         end
 
+        -- Only show Add Mount section if less than max mounts selected
+        if #selectedMounts >= maxMounts then
+            return  -- Don't show search section when at max capacity
+        end
+
         -- Spacer
-        yOffset = yOffset - 10
+        yOffset = yOffset - 15
 
         -- Search section header
         local searchHeader = mountsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         searchHeader:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
-        searchHeader:SetText("Add Mount (search your collection)")
+        searchHeader:SetText("Add Mount")
         searchHeader:SetTextColor(0.4, 0.6, 1)
-        yOffset = yOffset - 20
+        yOffset = yOffset - 22
 
         -- Search box
         local searchBox = CreateFrame("EditBox", "TakeMeHomeMountSearch", mountsContent, "InputBoxTemplate")
-        searchBox:SetSize(200, 20)
-        searchBox:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 5, yOffset)
+        searchBox:SetSize(290, 22)
+        searchBox:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 8, yOffset)
         searchBox:SetAutoFocus(false)
         searchBox:SetMaxLetters(50)
+        yOffset = yOffset - 28
 
         -- Search results container
         local resultsContainer = CreateFrame("Frame", nil, mountsContent)
-        resultsContainer:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset - 25)
+        resultsContainer:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
         resultsContainer:SetSize(300, 150)
 
         local function DisplaySearchResults(searchText)
@@ -1686,9 +1725,78 @@ local function CreateConfigPanel()
     -- Refresh mounts when tab is shown
     mountsTab:HookScript("OnClick", RefreshMountsTab)
 
+    -- =====================
+    -- FUNCTION TAB CONTENT
+    -- =====================
+    local FUNCTION_DEFINITIONS = {
+        { key = "logout", name = "Logout", icon = "Interface\\Icons\\Spell_Shadow_Teleport" },
+    }
+
+    local function IsFunctionEnabled(key)
+        if not TakeMeHomeDB or not TakeMeHomeDB.functionSettings then return true end
+        local settings = TakeMeHomeDB.functionSettings[key]
+        if not settings then return true end
+        return settings.enabled
+    end
+
+    local function RefreshFunctionTab()
+        -- Clear existing children
+        for _, child in ipairs({functionContent:GetChildren()}) do
+            child:Hide()
+            child:SetParent(nil)
+        end
+        -- Clear existing regions
+        for _, region in ipairs({functionContent:GetRegions()}) do
+            region:Hide()
+            region:SetParent(nil)
+        end
+
+        local yOffset = 0
+        for i, def in ipairs(FUNCTION_DEFINITIONS) do
+            local row = CreateFrame("Frame", nil, functionContent, "BackdropTemplate")
+            row:SetSize(300, 30)
+            row:SetPoint("TOPLEFT", functionContent, "TOPLEFT", 0, yOffset)
+
+            row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
+            row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
+
+            local checkbox = CreateFrame("CheckButton", "TakeMeHomeFuncCheck"..def.key, row, "UICheckButtonTemplate")
+            checkbox:SetPoint("LEFT", row, "LEFT", 5, 0)
+            checkbox:SetChecked(IsFunctionEnabled(def.key))
+            checkbox.key = def.key
+
+            checkbox:SetScript("OnClick", function(self)
+                if not TakeMeHomeDB.functionSettings[self.key] then
+                    TakeMeHomeDB.functionSettings[self.key] = { enabled = true, order = 1 }
+                end
+                TakeMeHomeDB.functionSettings[self.key].enabled = self:GetChecked()
+                UpdateFunctionButtons()
+            end)
+
+            -- Icon
+            local icon = row:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(20, 20)
+            icon:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
+            icon:SetTexture(def.icon)
+            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            label:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+            label:SetWidth(180)
+            label:SetJustifyH("LEFT")
+            label:SetText(def.name)
+
+            yOffset = yOffset - 32
+        end
+    end
+
+    -- Refresh function tab when shown
+    functionTab:HookScript("OnClick", RefreshFunctionTab)
+
     -- Initial population of tabs (so they're not empty when first opened)
     RefreshProfessionsTab()
     RefreshMountsTab()
+    RefreshFunctionTab()
 
     -- Instructions
     local instructions = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -2131,6 +2239,7 @@ UpdateMountButtons = function()
 
     local visibleCount = 0
     local maxMounts = 6
+    local mountColumns = 3  -- 3 mounts per row
 
     for i, mountEntry in ipairs(selectedMounts) do
         if visibleCount >= maxMounts then break end
@@ -2154,10 +2263,13 @@ UpdateMountButtons = function()
                 button.icon:SetTexture(GetSpellTexture(mountEntry.spellID))
             end
 
-            -- Position
+            -- Position in 3-column grid
+            local col = visibleCount % mountColumns
+            local row = math.floor(visibleCount / mountColumns)
             button:ClearAllPoints()
             button:SetPoint("TOPLEFT", mountsButtonContainer, "TOPLEFT",
-                visibleCount * (mountButtonSize + mountButtonSpacing), 0)
+                col * (mountButtonSize + mountButtonSpacing),
+                -row * (mountButtonSize + mountButtonSpacing))
             button:Show()
 
             visibleCount = visibleCount + 1
@@ -2170,9 +2282,11 @@ UpdateMountButtons = function()
         return
     end
 
-    local width = (visibleCount * mountButtonSize) + ((visibleCount - 1) * mountButtonSpacing) + 10
+    local numRows = math.ceil(visibleCount / mountColumns)
+    local numCols = math.min(visibleCount, mountColumns)
+    local width = (numCols * mountButtonSize) + ((numCols - 1) * mountButtonSpacing) + 10
     local bannerPadding = (TakeMeHomeDB and TakeMeHomeDB.locked) and 10 or 20
-    local height = mountButtonSize + bannerPadding
+    local height = (numRows * mountButtonSize) + ((numRows - 1) * mountButtonSpacing) + bannerPadding
 
     mountsFrame:SetSize(width, height)
     -- Only show if user wants windows visible
@@ -2193,6 +2307,238 @@ InitializeMounts = function()
 
     -- Delay to ensure mount data is loaded
     C_Timer.After(2, UpdateMountButtons)
+end
+
+-- ============================================
+-- FUNCTION WINDOW
+-- ============================================
+
+local functionFrame = CreateFrame("Frame", "TakeMeHomeFunctionFrame", UIParent, "BackdropTemplate")
+functionFrame:SetSize(46, 46)
+functionFrame:SetPoint("CENTER", 0, -100)
+functionFrame:SetMovable(true)
+functionFrame:EnableMouse(true)
+functionFrame:RegisterForDrag("LeftButton")
+functionFrame:SetClampedToScreen(true)
+functionFrame:Hide()
+
+-- Modern dark backdrop with subtle border
+functionFrame:SetBackdrop({
+    bgFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeSize = 1,
+    insets = { left = 1, right = 1, top = 1, bottom = 1 }
+})
+functionFrame:SetBackdropColor(0.05, 0.05, 0.08, 0.9)
+functionFrame:SetBackdropBorderColor(0.3, 0.3, 0.35, 0.8)
+
+-- Scale to 75% (same as other frames)
+functionFrame:SetScale(0.75)
+
+-- Drag banner for function frame
+local funcDragBanner = CreateFrame("Frame", nil, functionFrame)
+funcDragBanner:SetHeight(8)
+funcDragBanner:SetPoint("TOPLEFT", functionFrame, "TOPLEFT", 1, -1)
+funcDragBanner:SetPoint("TOPRIGHT", functionFrame, "TOPRIGHT", -1, -1)
+funcDragBanner:EnableMouse(true)
+funcDragBanner:RegisterForDrag("LeftButton")
+
+local funcBannerTexture = funcDragBanner:CreateTexture(nil, "BACKGROUND")
+funcBannerTexture:SetAllPoints()
+funcBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
+
+funcDragBanner:SetScript("OnDragStart", function(self)
+    if not TakeMeHomeDB.locked then
+        functionFrame:StartMoving()
+    end
+end)
+
+funcDragBanner:SetScript("OnDragStop", function(self)
+    functionFrame:StopMovingOrSizing()
+    local point, _, _, x, y = functionFrame:GetPoint()
+    TakeMeHomeDB.functionPosition = { point = point, x = x, y = y }
+end)
+
+-- Right-click to show menu
+funcDragBanner:SetScript("OnMouseUp", function(self, button)
+    if button == "RightButton" then
+        ShowBannerContextMenu(self)
+    end
+end)
+
+-- Hover to show banner when locked
+funcDragBanner:SetScript("OnEnter", function(self)
+    if TakeMeHomeDB and TakeMeHomeDB.locked then
+        funcBannerTexture:SetColorTexture(0.3, 0.6, 0.9, 0.8)
+    end
+end)
+
+funcDragBanner:SetScript("OnLeave", function(self)
+    if TakeMeHomeDB and TakeMeHomeDB.locked then
+        funcBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.0)
+    end
+end)
+
+-- Drag functionality
+functionFrame:SetScript("OnDragStart", function(self)
+    if not TakeMeHomeDB.locked then
+        self:StartMoving()
+    end
+end)
+
+functionFrame:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    local point, _, _, x, y = self:GetPoint()
+    TakeMeHomeDB.functionPosition = { point = point, x = x, y = y }
+end)
+
+-- Container for function buttons
+local funcButtonContainer = CreateFrame("Frame", nil, functionFrame)
+funcButtonContainer:SetPoint("TOPLEFT", functionFrame, "TOPLEFT", 5, -15)
+funcButtonContainer:SetPoint("BOTTOMRIGHT", functionFrame, "BOTTOMRIGHT", -5, 5)
+
+-- Function to update function drag banner
+UpdateFuncDragBanner = function()
+    if TakeMeHomeDB and TakeMeHomeDB.locked then
+        funcBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.0)
+        funcDragBanner:Show()
+        funcButtonContainer:ClearAllPoints()
+        funcButtonContainer:SetPoint("TOPLEFT", functionFrame, "TOPLEFT", 5, -5)
+        funcButtonContainer:SetPoint("BOTTOMRIGHT", functionFrame, "BOTTOMRIGHT", -5, 5)
+    else
+        funcBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
+        funcDragBanner:Show()
+        funcButtonContainer:ClearAllPoints()
+        funcButtonContainer:SetPoint("TOPLEFT", functionFrame, "TOPLEFT", 5, -15)
+        funcButtonContainer:SetPoint("BOTTOMRIGHT", functionFrame, "BOTTOMRIGHT", -5, 5)
+    end
+end
+
+local functionButtons = {}
+local funcButtonSize = 36
+local funcButtonSpacing = 6
+local funcButtonCounter = 0
+
+-- Helper function to check if a function button is enabled
+local function IsFuncButtonEnabled(key)
+    if not TakeMeHomeDB or not TakeMeHomeDB.functionSettings then return true end
+    local settings = TakeMeHomeDB.functionSettings[key]
+    if not settings then return true end
+    return settings.enabled
+end
+
+-- Create a function button
+local function CreateFunctionButton(funcData)
+    funcButtonCounter = funcButtonCounter + 1
+    -- Use SecureActionButtonTemplate with macro type for protected actions
+    local button = CreateFrame("Button", "TakeMeHomeFuncBtn"..funcButtonCounter, funcButtonContainer, "SecureActionButtonTemplate")
+    button:SetSize(funcButtonSize, funcButtonSize)
+    button:RegisterForClicks("AnyUp", "AnyDown")
+
+    -- Set up as macro button for logout
+    if funcData.key == "logout" then
+        button:SetAttribute("type", "macro")
+        button:SetAttribute("macrotext", "/logout")
+    end
+
+    -- Icon texture
+    button.icon = button:CreateTexture(nil, "ARTWORK")
+    button.icon:SetAllPoints()
+    button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    button.icon:SetTexture(funcData.icon)
+
+    -- Highlight texture
+    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(1, 1, 1, 0.3)
+
+    -- Store function data
+    button.funcKey = funcData.key
+    button.funcName = funcData.name
+
+    -- Tooltip
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(self.funcName, 1, 1, 1)
+        if self.funcKey == "logout" then
+            GameTooltip:AddLine("Log out of the game", 0.8, 0.8, 0.8)
+        end
+        GameTooltip:Show()
+    end)
+
+    button:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    return button
+end
+
+-- Function button definitions
+local FUNC_BUTTON_DEFINITIONS = {
+    { key = "logout", name = "Logout", icon = "Interface\\Icons\\Spell_Shadow_Teleport" },
+}
+
+-- Update function buttons
+UpdateFunctionButtons = function()
+    -- Clear existing buttons
+    for _, button in ipairs(functionButtons) do
+        button:Hide()
+        button:SetParent(nil)
+    end
+    wipe(functionButtons)
+
+    local visibleCount = 0
+    local funcColumns = 1  -- Single column for now
+
+    for i, funcDef in ipairs(FUNC_BUTTON_DEFINITIONS) do
+        if IsFuncButtonEnabled(funcDef.key) then
+            local button = CreateFunctionButton(funcDef)
+            table.insert(functionButtons, button)
+
+            -- Position
+            local col = visibleCount % funcColumns
+            local row = math.floor(visibleCount / funcColumns)
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", funcButtonContainer, "TOPLEFT",
+                col * (funcButtonSize + funcButtonSpacing),
+                -row * (funcButtonSize + funcButtonSpacing))
+            button:Show()
+
+            visibleCount = visibleCount + 1
+        end
+    end
+
+    -- Resize frame based on visible buttons
+    if visibleCount == 0 then
+        functionFrame:Hide()
+        return
+    end
+
+    local numRows = math.ceil(visibleCount / funcColumns)
+    local numCols = math.min(visibleCount, funcColumns)
+    local width = (numCols * funcButtonSize) + ((numCols - 1) * funcButtonSpacing) + 10
+    local bannerPadding = (TakeMeHomeDB and TakeMeHomeDB.locked) and 10 or 20
+    local height = (numRows * funcButtonSize) + ((numRows - 1) * funcButtonSpacing) + bannerPadding
+
+    functionFrame:SetSize(width, height)
+    -- Only show if user wants windows visible
+    if userWantsWindowsVisible then
+        functionFrame:Show()
+    end
+    UpdateFuncDragBanner()
+end
+
+-- Initialize function window on login
+InitializeFunction = function()
+    -- Restore position
+    if TakeMeHomeDB.functionPosition then
+        local pos = TakeMeHomeDB.functionPosition
+        functionFrame:ClearAllPoints()
+        functionFrame:SetPoint(pos.point, UIParent, pos.point, pos.x, pos.y)
+    end
+
+    -- Delay to ensure data is loaded
+    C_Timer.After(2, UpdateFunctionButtons)
 end
 
 -- ============================================
@@ -2263,11 +2609,13 @@ minimapButton:SetScript("OnClick", function(self, button)
             mainFrame:Hide()
             professionFrame:Hide()
             mountsFrame:Hide()
+            functionFrame:Hide()
             userWantsWindowsVisible = false
         else
             mainFrame:Show()
             professionFrame:Show()
             mountsFrame:Show()
+            functionFrame:Show()
             userWantsWindowsVisible = true
         end
     elseif button == "RightButton" then
@@ -2300,6 +2648,7 @@ local function UpdateScale(newScale)
     mainFrame:SetScale(newScale)
     professionFrame:SetScale(newScale)
     mountsFrame:SetScale(newScale)
+    functionFrame:SetScale(newScale)
 end
 
 -- Slash commands
@@ -2314,23 +2663,28 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         UpdateMainDragBanner()
         UpdateProfDragBanner()
         UpdateMountsDragBanner()
+        UpdateFuncDragBanner()
         print("|cff00ff00TakeMeHome|r: Windows locked.")
     elseif cmd == "unlock" then
         TakeMeHomeDB.locked = false
         UpdateMainDragBanner()
         UpdateProfDragBanner()
         UpdateMountsDragBanner()
+        UpdateFuncDragBanner()
         print("|cff00ff00TakeMeHome|r: Windows unlocked. Drag to move.")
     elseif cmd == "reset" then
         TakeMeHomeDB.position = { point = "CENTER", x = 0, y = 0 }
         TakeMeHomeDB.professionPosition = { point = "CENTER", x = 100, y = 0 }
         TakeMeHomeDB.mountsPosition = { point = "CENTER", x = -100, y = 0 }
+        TakeMeHomeDB.functionPosition = { point = "CENTER", x = 0, y = -100 }
         mainFrame:ClearAllPoints()
         mainFrame:SetPoint("CENTER")
         professionFrame:ClearAllPoints()
         professionFrame:SetPoint("CENTER", 100, 0)
         mountsFrame:ClearAllPoints()
         mountsFrame:SetPoint("CENTER", -100, 0)
+        functionFrame:ClearAllPoints()
+        functionFrame:SetPoint("CENTER", 0, -100)
         print("|cff00ff00TakeMeHome|r: All positions reset to center.")
     elseif cmd == "toggle" or cmd == "" then
         if mainFrame:IsShown() then
@@ -2357,6 +2711,21 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         professionFrame:ClearAllPoints()
         professionFrame:SetPoint("CENTER", 100, 0)
         print("|cff00ff00TakeMeHome|r: Professions position reset.")
+    elseif cmd == "func" or cmd == "function" then
+        if functionFrame:IsShown() then
+            functionFrame:Hide()
+        else
+            UpdateFunctionButtons()
+        end
+    elseif cmd == "func show" or cmd == "function show" then
+        UpdateFunctionButtons()
+    elseif cmd == "func hide" or cmd == "function hide" then
+        functionFrame:Hide()
+    elseif cmd == "func reset" or cmd == "function reset" then
+        TakeMeHomeDB.functionPosition = { point = "CENTER", x = 0, y = -100 }
+        functionFrame:ClearAllPoints()
+        functionFrame:SetPoint("CENTER", 0, -100)
+        print("|cff00ff00TakeMeHome|r: Function position reset.")
     elseif cmd == "config" or cmd == "settings" or cmd == "options" then
         CreateConfigPanel()
     else
@@ -2368,6 +2737,10 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         print("  |cff00ffff/tmh prof show|r - Show professions window")
         print("  |cff00ffff/tmh prof hide|r - Hide professions window")
         print("  |cff00ffff/tmh prof reset|r - Reset professions position")
+        print("  |cff00ffff/tmh func|r - Toggle function window")
+        print("  |cff00ffff/tmh func show|r - Show function window")
+        print("  |cff00ffff/tmh func hide|r - Hide function window")
+        print("  |cff00ffff/tmh func reset|r - Reset function position")
         print("  |cff00ffff/tmh lock|r - Lock all window positions")
         print("  |cff00ffff/tmh unlock|r - Unlock all windows (allow dragging)")
         print("  |cff00ffff/tmh reset|r - Reset all windows to center")
