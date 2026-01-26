@@ -343,6 +343,9 @@ end
 
 -- Snap a frame to a position and link it to the target
 local function SnapAndLinkWindow(frame, targetKey, snapX, snapY)
+    -- Don't reposition frames during combat (protected frames)
+    if InCombatLockdown() then return end
+
     local windowKey = GetWindowKey(frame)
 
     -- snapX, snapY are in screen coordinates (from GetRect)
@@ -383,6 +386,9 @@ end
 
 -- Move all linked windows by the same delta (called during drag via OnUpdate)
 local function MoveLinkedWindowsDuringDrag(primaryFrame)
+    -- Don't reposition frames during combat (protected frames)
+    if InCombatLockdown() then return end
+
     local primaryKey = GetWindowKey(primaryFrame)
     if not primaryKey then return end
 
@@ -433,6 +439,9 @@ end
 
 -- Start dragging with linked window updates
 local function StartLinkedDrag(primaryFrame)
+    -- Don't allow dragging during combat (protected frames)
+    if InCombatLockdown() then return end
+
     StoreDragStartPositions(primaryFrame)
     primaryFrame:StartMoving()
 
@@ -1278,6 +1287,9 @@ end
 
 -- Reposition all visible buttons and update frame size (2 rows layout)
 local function RepositionButtons()
+    -- Don't reposition secure buttons during combat
+    if InCombatLockdown() then return end
+
     local row1Count = 0  -- Hearthstones (top row)
     local row2Count = 0  -- Utilities (bottom row)
 
@@ -2673,6 +2685,9 @@ end
 
 -- Update mount buttons
 UpdateMountButtons = function()
+    -- Don't update secure buttons during combat
+    if InCombatLockdown() then return end
+
     -- Clear existing buttons
     for _, button in ipairs(mountButtons) do
         button:Hide()
@@ -2948,6 +2963,9 @@ local FUNC_BUTTON_DEFINITIONS = {
 
 -- Update function buttons
 UpdateFunctionButtons = function()
+    -- Don't update secure buttons during combat
+    if InCombatLockdown() then return end
+
     -- Clear existing buttons
     for _, button in ipairs(functionButtons) do
         button:Hide()
