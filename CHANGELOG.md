@@ -1,5 +1,17 @@
 # TakeMeHome Changelog
 
+## [1.5.0] - 2025-01-30
+### Added
+- **Druid Support**: Travel Form button in Mounts window (Druid only)
+- **Druid Support**: Dreamwalk/Teleport: Moonglade button in Hearthstone window (Druid only, prefers Dreamwalk if known)
+- Windows automatically hide during combat
+- Windows automatically hide during pet battles
+- Combat lockdown protection to prevent "ADDON_ACTION_BLOCKED" errors
+
+### Changed
+- Logout button now uses the exit vehicle icon
+- Windows restore automatically when leaving combat or pet battles
+
 ## [1.4.0] - 2025-01-25
 ### Added
 - Window snapping system - windows snap together when dragged within 20 pixels of each other

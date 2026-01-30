@@ -50,12 +50,26 @@ local WARBAND_BANK_SPELL = { name = "Warband Bank Distance Inhibitor" }
 -- Mobile Banking Spell (Guild Perk)
 local MOBILE_BANKING_SPELL = { name = "Mobile Banking" }
 
+-- Druid-specific spells
+local DRUID_SPELLS = {
+    dreamwalk = { spellID = 193753, name = "Dreamwalk" },
+    moonglade = { spellID = 18960, name = "Teleport: Moonglade" },
+    travelForm = { spellID = 783, name = "Travel Form" },
+}
+
+-- Helper to check if player is a Druid
+local function IsDruid()
+    local _, playerClass = UnitClass("player")
+    return playerClass == "DRUID"
+end
+
 -- Button definitions with keys for settings
 local BUTTON_DEFINITIONS = {
     -- Row 1: Hearthstones
     { key = "hearthstone", name = "Hearthstone", row = 1 },
     { key = "dalaran_hearthstone", name = "Dalaran Hearthstone", row = 1 },
     { key = "garrison_hearthstone", name = "Garrison Hearthstone", row = 1 },
+    { key = "druid_teleport", name = "Dreamwalk", row = 1, classRestricted = "DRUID" },
     -- Row 2: Utilities
     { key = "mailbox", name = "Mailbox", row = 2 },
     { key = "warband_bank", name = "Warband Bank", row = 2 },
@@ -75,9 +89,10 @@ local defaults = {
         hearthstone = { enabled = true, order = 1 },
         dalaran_hearthstone = { enabled = true, order = 2 },
         garrison_hearthstone = { enabled = true, order = 3 },
-        mailbox = { enabled = true, order = 4 },
-        warband_bank = { enabled = true, order = 5 },
-        mobile_banking = { enabled = true, order = 6 },
+        druid_teleport = { enabled = true, order = 4 },
+        mailbox = { enabled = true, order = 5 },
+        warband_bank = { enabled = true, order = 6 },
+        mobile_banking = { enabled = true, order = 7 },
     },
     professionSettings = {
         -- Will be populated dynamically based on learned professions
@@ -127,6 +142,9 @@ local UpdateProfessionButtons, UpdateMountButtons, UpdateFunctionButtons
 
 -- Track if user wants windows visible (used by minimap toggle)
 local userWantsWindowsVisible = true
+
+-- Track if windows are hidden due to combat or pet battle
+local isInCombatOrPetBattle = false
 
 -- ============================================
 -- WINDOW SNAPPING AND LINKING SYSTEM
@@ -789,6 +807,9 @@ local warbandBankButton = nil
 -- Mobile Banking button reference
 local mobileBankingButton = nil
 
+-- Druid teleport button reference
+local druidTeleportButton = nil
+
 -- Config frame reference
 local configFrame = nil
 
@@ -1168,6 +1189,112 @@ local function UpdateMobileBankingButton()
     end
 end
 
+-- Create Druid teleport button (Dreamwalk or Moonglade)
+local function CreateDruidTeleportButton(parent, index)
+    local button = CreateFrame("Button", "TakeMeHomeDruidTeleport", parent, "SecureActionButtonTemplate")
+    button:SetSize(buttonSize, buttonSize)
+    button:RegisterForClicks("AnyUp", "AnyDown")
+
+    -- Position will be set by RepositionButtons
+    button:SetPoint("LEFT", parent, "LEFT", 0, 0)
+
+    button:SetAttribute("type", "spell")
+    -- Spell will be set dynamically in UpdateDruidTeleportButton
+
+    -- Icon texture
+    button.icon = button:CreateTexture(nil, "ARTWORK")
+    button.icon:SetAllPoints()
+    button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    -- Cooldown frame
+    button.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    button.cooldown:SetAllPoints(button.icon)
+    button.cooldown:SetDrawEdge(true)
+
+    -- Highlight texture
+    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(1, 1, 1, 0.3)
+
+    -- Tooltip
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetSpellByID(self.spellID or 0)
+        GameTooltip:Show()
+    end)
+
+    button:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    -- Start hidden
+    button:Hide()
+
+    return button
+end
+
+-- Update the Druid teleport button
+local function UpdateDruidTeleportButton()
+    if not druidTeleportButton then return end
+
+    -- Can't modify secure buttons during combat
+    if InCombatLockdown() then return end
+
+    -- Only show for Druids
+    if not IsDruid() then
+        druidTeleportButton:Hide()
+        return
+    end
+
+    -- Check if enabled in settings
+    if not IsButtonEnabled("druid_teleport") then
+        druidTeleportButton:Hide()
+        return
+    end
+
+    -- Check for Dreamwalk first, then fall back to Moonglade
+    local spellToUse = nil
+    local dreamwalkInfo = C_Spell.GetSpellInfo(DRUID_SPELLS.dreamwalk.spellID)
+    local moongladeInfo = C_Spell.GetSpellInfo(DRUID_SPELLS.moonglade.spellID)
+
+    -- Prefer Dreamwalk if known
+    if dreamwalkInfo and IsSpellKnown(DRUID_SPELLS.dreamwalk.spellID) then
+        spellToUse = { spellID = DRUID_SPELLS.dreamwalk.spellID, name = DRUID_SPELLS.dreamwalk.name, info = dreamwalkInfo }
+    elseif moongladeInfo and IsSpellKnown(DRUID_SPELLS.moonglade.spellID) then
+        spellToUse = { spellID = DRUID_SPELLS.moonglade.spellID, name = DRUID_SPELLS.moonglade.name, info = moongladeInfo }
+    end
+
+    if not spellToUse then
+        druidTeleportButton:Hide()
+        return
+    end
+
+    druidTeleportButton:Show()
+    druidTeleportButton.spellID = spellToUse.spellID
+    druidTeleportButton:SetAttribute("spell", spellToUse.name)
+
+    -- Update icon
+    local icon = spellToUse.info.iconID
+    if icon then
+        druidTeleportButton.icon:SetTexture(icon)
+    end
+
+    -- Update cooldown
+    local cooldownInfo = C_Spell.GetSpellCooldown(spellToUse.spellID)
+    local success, hasCooldown = pcall(function()
+        return cooldownInfo and cooldownInfo.startTime and cooldownInfo.duration and cooldownInfo.duration > 0
+    end)
+    if success and hasCooldown then
+        pcall(function()
+            druidTeleportButton.cooldown:SetCooldown(cooldownInfo.startTime, cooldownInfo.duration)
+        end)
+        druidTeleportButton:SetAlpha(0.5)
+    else
+        druidTeleportButton.cooldown:Clear()
+        druidTeleportButton:SetAlpha(1)
+    end
+end
+
 -- Update button appearance and cooldown
 local function UpdateButton(button)
     local itemID = button.itemID
@@ -1302,6 +1429,13 @@ local function RepositionButtons()
         end
     end
 
+    -- Druid teleport button (Row 1, after hearthstones)
+    if druidTeleportButton and druidTeleportButton:IsShown() then
+        druidTeleportButton:ClearAllPoints()
+        druidTeleportButton:SetPoint("TOPLEFT", buttonContainer, "TOPLEFT", row1Count * (buttonSize + buttonSpacing), 0)
+        row1Count = row1Count + 1
+    end
+
     -- Row 2: Utility buttons (mailbox, warband bank)
     local row2Y = -(buttonSize + buttonSpacing)
 
@@ -1338,8 +1472,8 @@ local function RepositionButtons()
         local bannerPadding = (TakeMeHomeDB and TakeMeHomeDB.locked) and 10 or 20
         local height = (numRows * buttonSize) + ((numRows - 1) * buttonSpacing) + bannerPadding
         mainFrame:SetSize(width, height)
-        -- Only show if user wants windows visible
-        if userWantsWindowsVisible then
+        -- Only show if user wants windows visible and not in combat/pet battle
+        if userWantsWindowsVisible and not isInCombatOrPetBattle then
             mainFrame:Show()
         end
         UpdateMainDragBanner()
@@ -1356,6 +1490,7 @@ local function UpdateAllButtons()
     UpdateMailboxButton()
     UpdateWarbandBankButton()
     UpdateMobileBankingButton()
+    UpdateDruidTeleportButton()
     RepositionButtons()
 end
 
@@ -1401,6 +1536,10 @@ local function InitializeButtons()
 
     -- Create Mobile Banking button (positioned after warband bank)
     mobileBankingButton = CreateMobileBankingButton(buttonContainer, nextIndex)
+    nextIndex = nextIndex + 1
+
+    -- Create Druid Teleport button (only visible for Druids)
+    druidTeleportButton = CreateDruidTeleportButton(buttonContainer, nextIndex)
 
     UpdateFrameSize()
 end
@@ -1412,6 +1551,9 @@ mainFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 mainFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 mainFrame:RegisterEvent("TOYS_UPDATED")
 mainFrame:RegisterEvent("PLAYER_REGEN_ENABLED") -- Out of combat, can update secure buttons
+mainFrame:RegisterEvent("PLAYER_REGEN_DISABLED") -- Entering combat
+mainFrame:RegisterEvent("PET_BATTLE_OPENING_START") -- Entering pet battle
+mainFrame:RegisterEvent("PET_BATTLE_CLOSE") -- Leaving pet battle
 
 mainFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -1506,10 +1648,49 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "SPELL_UPDATE_COOLDOWN" or event == "TOYS_UPDATED" then
         UpdateAllButtons()
     elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Leaving combat - restore windows via update functions (they handle show/hide based on content)
+        isInCombatOrPetBattle = false
         -- Update secure button attributes when leaving combat
         UpdateMailboxButton()
         UpdateWarbandBankButton()
         UpdateMobileBankingButton()
+        UpdateDruidTeleportButton()
+        -- Refresh all windows - update functions will show them if they have content
+        if userWantsWindowsVisible then
+            UpdateAllButtons() -- Handles mainFrame
+            C_Timer.After(0.1, function()
+                if UpdateProfessionButtons then UpdateProfessionButtons() end
+                if UpdateMountButtons then UpdateMountButtons() end
+                if UpdateFunctionButtons then UpdateFunctionButtons() end
+            end)
+        end
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        -- Entering combat - hide all windows (use global names since local vars defined later)
+        isInCombatOrPetBattle = true
+        mainFrame:Hide()
+        if TakeMeHomeProfessions then TakeMeHomeProfessions:Hide() end
+        if TakeMeHomeMountsFrame then TakeMeHomeMountsFrame:Hide() end
+        if TakeMeHomeFunctionFrame then TakeMeHomeFunctionFrame:Hide() end
+    elseif event == "PET_BATTLE_OPENING_START" then
+        -- Entering pet battle - hide all windows
+        isInCombatOrPetBattle = true
+        mainFrame:Hide()
+        if TakeMeHomeProfessions then TakeMeHomeProfessions:Hide() end
+        if TakeMeHomeMountsFrame then TakeMeHomeMountsFrame:Hide() end
+        if TakeMeHomeFunctionFrame then TakeMeHomeFunctionFrame:Hide() end
+    elseif event == "PET_BATTLE_CLOSE" then
+        -- Leaving pet battle - restore windows via update functions (they handle show/hide based on content)
+        if not InCombatLockdown() then
+            isInCombatOrPetBattle = false
+            if userWantsWindowsVisible then
+                UpdateAllButtons() -- Handles mainFrame
+                C_Timer.After(0.1, function()
+                    if UpdateProfessionButtons then UpdateProfessionButtons() end
+                    if UpdateMountButtons then UpdateMountButtons() end
+                    if UpdateFunctionButtons then UpdateFunctionButtons() end
+                end)
+            end
+        end
     end
 end)
 
@@ -2143,7 +2324,7 @@ local function CreateConfigPanel()
     -- FUNCTION TAB CONTENT
     -- =====================
     local FUNCTION_DEFINITIONS = {
-        { key = "logout", name = "Logout", icon = "Interface\\Icons\\Spell_Shadow_Teleport" },
+        { key = "logout", name = "Logout", icon = "Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up" },
     }
 
     local function IsFunctionEnabled(key)
@@ -2484,8 +2665,8 @@ UpdateProfessionButtons = function()
     local height = (numRows * profButtonSize) + ((numRows - 1) * profButtonSpacing) + bannerPadding
 
     professionFrame:SetSize(width, height)
-    -- Only show if user wants windows visible
-    if userWantsWindowsVisible then
+    -- Only show if user wants windows visible and not in combat/pet battle
+    if userWantsWindowsVisible and not isInCombatOrPetBattle then
         professionFrame:Show()
     end
     UpdateProfDragBanner()
@@ -2737,6 +2918,36 @@ UpdateMountButtons = function()
         end
     end
 
+    -- Add Travel Form button for Druids
+    if IsDruid() and visibleCount < maxMounts then
+        local travelFormSpell = DRUID_SPELLS.travelForm
+        local spellInfo = C_Spell.GetSpellInfo(travelFormSpell.spellID)
+
+        if spellInfo and IsSpellKnown(travelFormSpell.spellID) then
+            local mountData = { spellID = travelFormSpell.spellID, name = travelFormSpell.name }
+            local button = CreateMountButton(mountData, travelFormSpell.name)
+            table.insert(mountButtons, button)
+
+            button.isCollected = true
+            button.spellID = travelFormSpell.spellID
+            button.isTravelForm = true
+
+            -- Set icon
+            button.icon:SetTexture(spellInfo.iconID)
+
+            -- Position in 3-column grid
+            local col = visibleCount % mountColumns
+            local row = math.floor(visibleCount / mountColumns)
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", mountsButtonContainer, "TOPLEFT",
+                col * (mountButtonSize + mountButtonSpacing),
+                -row * (mountButtonSize + mountButtonSpacing))
+            button:Show()
+
+            visibleCount = visibleCount + 1
+        end
+    end
+
     -- Resize frame based on visible mounts
     if visibleCount == 0 then
         mountsFrame:Hide()
@@ -2750,8 +2961,8 @@ UpdateMountButtons = function()
     local height = (numRows * mountButtonSize) + ((numRows - 1) * mountButtonSpacing) + bannerPadding
 
     mountsFrame:SetSize(width, height)
-    -- Only show if user wants windows visible
-    if userWantsWindowsVisible then
+    -- Only show if user wants windows visible and not in combat/pet battle
+    if userWantsWindowsVisible and not isInCombatOrPetBattle then
         mountsFrame:Show()
     end
     UpdateMountsDragBanner()
@@ -2958,7 +3169,7 @@ end
 
 -- Function button definitions
 local FUNC_BUTTON_DEFINITIONS = {
-    { key = "logout", name = "Logout", icon = "Interface\\Icons\\Spell_Shadow_Teleport" },
+    { key = "logout", name = "Logout", icon = "Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up" },
 }
 
 -- Update function buttons
@@ -3007,8 +3218,8 @@ UpdateFunctionButtons = function()
     local height = (numRows * funcButtonSize) + ((numRows - 1) * funcButtonSpacing) + bannerPadding
 
     functionFrame:SetSize(width, height)
-    -- Only show if user wants windows visible
-    if userWantsWindowsVisible then
+    -- Only show if user wants windows visible and not in combat/pet battle
+    if userWantsWindowsVisible and not isInCombatOrPetBattle then
         functionFrame:Show()
     end
     UpdateFuncDragBanner()
@@ -3098,11 +3309,14 @@ minimapButton:SetScript("OnClick", function(self, button)
             functionFrame:Hide()
             userWantsWindowsVisible = false
         else
-            mainFrame:Show()
-            professionFrame:Show()
-            mountsFrame:Show()
-            functionFrame:Show()
             userWantsWindowsVisible = true
+            -- Only show if not in combat or pet battle
+            if not isInCombatOrPetBattle then
+                mainFrame:Show()
+                professionFrame:Show()
+                mountsFrame:Show()
+                functionFrame:Show()
+            end
         end
     elseif button == "RightButton" then
         -- Open settings
