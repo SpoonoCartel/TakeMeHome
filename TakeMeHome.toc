@@ -2,7 +2,7 @@
 ## Title: TakeMeHome
 ## Notes: Quick access to Hearthstones and travel options in a movable window
 ## Author: SpoonoTV
-## Version: 1.5.0
+## Version: 1.6.0
 ## SavedVariables: TakeMeHomeDB
 
 TakeMeHome.lua

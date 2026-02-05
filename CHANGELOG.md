@@ -1,5 +1,18 @@
 # TakeMeHome Changelog
 
+## [1.6.0] - 2025-02-05
+### Added
+- **Mission Table Window**: Quick access to expansion mission tables
+  - Warlords of Draenor (Garrison)
+  - Legion (Order Hall)
+  - Battle for Azeroth (War Campaign)
+  - Shadowlands (Covenant)
+- Toggle functionality - click again to close mission table
+- Expansion-specific icons (Garrison Resources, Order Resources, Heart of Azeroth, Anima)
+
+### Removed
+- Combat and pet battle auto-hide feature (by user request)
+
 ## [1.5.0] - 2025-01-30
 ### Added
 - **Druid Support**: Travel Form button in Mounts window (Druid only)

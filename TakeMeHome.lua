@@ -82,6 +82,7 @@ local defaults = {
     professionPosition = { point = "CENTER", x = 100, y = 0 },
     mountsPosition = { point = "CENTER", x = -100, y = 0 },
     functionPosition = { point = "CENTER", x = 0, y = -100 },
+    missionPosition = { point = "CENTER", x = 100, y = -100 },
     locked = false,
     scale = 0.75,
     minimapPos = 220, -- Angle around minimap
@@ -106,6 +107,12 @@ local defaults = {
     },
     functionSettings = {
         logout = { enabled = true, order = 1 },
+    },
+    missionSettings = {
+        wod = { enabled = true, order = 1 },
+        legion = { enabled = true, order = 2 },
+        bfa = { enabled = true, order = 3 },
+        shadowlands = { enabled = true, order = 4 },
     },
     -- Window snapping and linking
     snapEnabled = true,
@@ -136,15 +143,12 @@ mainFrame:SetBackdropBorderColor(0.3, 0.3, 0.35, 0.8)
 mainFrame:SetScale(0.75)
 
 -- Forward declarations for banner update functions and initialization
-local UpdateMainDragBanner, UpdateProfDragBanner, UpdateMountsDragBanner, UpdateFuncDragBanner
-local InitializeProfessions, InitializeMounts, InitializeFunction
-local UpdateProfessionButtons, UpdateMountButtons, UpdateFunctionButtons
+local UpdateMainDragBanner, UpdateProfDragBanner, UpdateMountsDragBanner, UpdateFuncDragBanner, UpdateMissionDragBanner
+local InitializeProfessions, InitializeMounts, InitializeFunction, InitializeMissions
+local UpdateProfessionButtons, UpdateMountButtons, UpdateFunctionButtons, UpdateMissionButtons
 
 -- Track if user wants windows visible (used by minimap toggle)
 local userWantsWindowsVisible = true
-
--- Track if windows are hidden due to combat or pet battle
-local isInCombatOrPetBattle = false
 
 -- ============================================
 -- WINDOW SNAPPING AND LINKING SYSTEM
@@ -168,12 +172,14 @@ local function InitializeWindowRegistry()
         professions = TakeMeHomeProfessions,
         mounts = TakeMeHomeMountsFrame,
         ["function"] = TakeMeHomeFunctionFrame,
+        missions = TakeMeHomeMissionFrame,
     }
     windowPositionKeys = {
         main = "position",
         professions = "professionPosition",
         mounts = "mountsPosition",
         ["function"] = "functionPosition",
+        missions = "missionPosition",
     }
 end
 
@@ -1473,7 +1479,7 @@ local function RepositionButtons()
         local height = (numRows * buttonSize) + ((numRows - 1) * buttonSpacing) + bannerPadding
         mainFrame:SetSize(width, height)
         -- Only show if user wants windows visible and not in combat/pet battle
-        if userWantsWindowsVisible and not isInCombatOrPetBattle then
+        if userWantsWindowsVisible  then
             mainFrame:Show()
         end
         UpdateMainDragBanner()
@@ -1551,9 +1557,6 @@ mainFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 mainFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 mainFrame:RegisterEvent("TOYS_UPDATED")
 mainFrame:RegisterEvent("PLAYER_REGEN_ENABLED") -- Out of combat, can update secure buttons
-mainFrame:RegisterEvent("PLAYER_REGEN_DISABLED") -- Entering combat
-mainFrame:RegisterEvent("PET_BATTLE_OPENING_START") -- Entering pet battle
-mainFrame:RegisterEvent("PET_BATTLE_CLOSE") -- Leaving pet battle
 
 mainFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -1597,6 +1600,16 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             TakeMeHomeDB.functionSettings = CopyTable(defaults.functionSettings)
         end
 
+        -- Ensure missionPosition exists
+        if not TakeMeHomeDB.missionPosition then
+            TakeMeHomeDB.missionPosition = CopyTable(defaults.missionPosition)
+        end
+
+        -- Ensure missionSettings exists
+        if not TakeMeHomeDB.missionSettings then
+            TakeMeHomeDB.missionSettings = CopyTable(defaults.missionSettings)
+        end
+
         -- Ensure snap/link settings exist
         if TakeMeHomeDB.snapEnabled == nil then
             TakeMeHomeDB.snapEnabled = defaults.snapEnabled
@@ -1632,6 +1645,9 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
         -- Initialize function window
         InitializeFunction()
 
+        -- Initialize mission table window
+        InitializeMissions()
+
         -- Initial update
         C_Timer.After(1, UpdateAllButtons)
 
@@ -1648,49 +1664,11 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "SPELL_UPDATE_COOLDOWN" or event == "TOYS_UPDATED" then
         UpdateAllButtons()
     elseif event == "PLAYER_REGEN_ENABLED" then
-        -- Leaving combat - restore windows via update functions (they handle show/hide based on content)
-        isInCombatOrPetBattle = false
         -- Update secure button attributes when leaving combat
         UpdateMailboxButton()
         UpdateWarbandBankButton()
         UpdateMobileBankingButton()
         UpdateDruidTeleportButton()
-        -- Refresh all windows - update functions will show them if they have content
-        if userWantsWindowsVisible then
-            UpdateAllButtons() -- Handles mainFrame
-            C_Timer.After(0.1, function()
-                if UpdateProfessionButtons then UpdateProfessionButtons() end
-                if UpdateMountButtons then UpdateMountButtons() end
-                if UpdateFunctionButtons then UpdateFunctionButtons() end
-            end)
-        end
-    elseif event == "PLAYER_REGEN_DISABLED" then
-        -- Entering combat - hide all windows (use global names since local vars defined later)
-        isInCombatOrPetBattle = true
-        mainFrame:Hide()
-        if TakeMeHomeProfessions then TakeMeHomeProfessions:Hide() end
-        if TakeMeHomeMountsFrame then TakeMeHomeMountsFrame:Hide() end
-        if TakeMeHomeFunctionFrame then TakeMeHomeFunctionFrame:Hide() end
-    elseif event == "PET_BATTLE_OPENING_START" then
-        -- Entering pet battle - hide all windows
-        isInCombatOrPetBattle = true
-        mainFrame:Hide()
-        if TakeMeHomeProfessions then TakeMeHomeProfessions:Hide() end
-        if TakeMeHomeMountsFrame then TakeMeHomeMountsFrame:Hide() end
-        if TakeMeHomeFunctionFrame then TakeMeHomeFunctionFrame:Hide() end
-    elseif event == "PET_BATTLE_CLOSE" then
-        -- Leaving pet battle - restore windows via update functions (they handle show/hide based on content)
-        if not InCombatLockdown() then
-            isInCombatOrPetBattle = false
-            if userWantsWindowsVisible then
-                UpdateAllButtons() -- Handles mainFrame
-                C_Timer.After(0.1, function()
-                    if UpdateProfessionButtons then UpdateProfessionButtons() end
-                    if UpdateMountButtons then UpdateMountButtons() end
-                    if UpdateFunctionButtons then UpdateFunctionButtons() end
-                end)
-            end
-        end
     end
 end)
 
@@ -2666,7 +2644,7 @@ UpdateProfessionButtons = function()
 
     professionFrame:SetSize(width, height)
     -- Only show if user wants windows visible and not in combat/pet battle
-    if userWantsWindowsVisible and not isInCombatOrPetBattle then
+    if userWantsWindowsVisible  then
         professionFrame:Show()
     end
     UpdateProfDragBanner()
@@ -2962,7 +2940,7 @@ UpdateMountButtons = function()
 
     mountsFrame:SetSize(width, height)
     -- Only show if user wants windows visible and not in combat/pet battle
-    if userWantsWindowsVisible and not isInCombatOrPetBattle then
+    if userWantsWindowsVisible  then
         mountsFrame:Show()
     end
     UpdateMountsDragBanner()
@@ -3219,7 +3197,7 @@ UpdateFunctionButtons = function()
 
     functionFrame:SetSize(width, height)
     -- Only show if user wants windows visible and not in combat/pet battle
-    if userWantsWindowsVisible and not isInCombatOrPetBattle then
+    if userWantsWindowsVisible  then
         functionFrame:Show()
     end
     UpdateFuncDragBanner()
@@ -3236,6 +3214,296 @@ InitializeFunction = function()
 
     -- Delay to ensure data is loaded
     C_Timer.After(2, UpdateFunctionButtons)
+end
+
+-- ============================================
+-- MISSION TABLE WINDOW
+-- ============================================
+
+local missionFrame = CreateFrame("Frame", "TakeMeHomeMissionFrame", UIParent, "BackdropTemplate")
+missionFrame:SetSize(160, 46)
+missionFrame:SetPoint("CENTER", 100, -100)
+missionFrame:SetMovable(true)
+missionFrame:EnableMouse(true)
+missionFrame:RegisterForDrag("LeftButton")
+missionFrame:SetClampedToScreen(true)
+missionFrame:Hide()
+
+-- Modern dark backdrop with subtle border
+missionFrame:SetBackdrop({
+    bgFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeSize = 1,
+    insets = { left = 1, right = 1, top = 1, bottom = 1 }
+})
+missionFrame:SetBackdropColor(0.05, 0.05, 0.08, 0.9)
+missionFrame:SetBackdropBorderColor(0.3, 0.3, 0.35, 0.8)
+
+-- Scale to 75% (same as other frames)
+missionFrame:SetScale(0.75)
+
+-- Drag banner for mission frame
+local missionDragBanner = CreateFrame("Frame", nil, missionFrame)
+missionDragBanner:SetHeight(8)
+missionDragBanner:SetPoint("TOPLEFT", missionFrame, "TOPLEFT", 1, -1)
+missionDragBanner:SetPoint("TOPRIGHT", missionFrame, "TOPRIGHT", -1, -1)
+missionDragBanner:EnableMouse(true)
+missionDragBanner:RegisterForDrag("LeftButton")
+
+local missionBannerTexture = missionDragBanner:CreateTexture(nil, "BACKGROUND")
+missionBannerTexture:SetAllPoints()
+missionBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
+
+missionDragBanner:SetScript("OnDragStart", function(self)
+    if not TakeMeHomeDB.locked then
+        StartLinkedDrag(missionFrame)
+    end
+end)
+
+missionDragBanner:SetScript("OnDragStop", function(self)
+    StopLinkedDrag(missionFrame)
+
+    -- Save primary window position
+    local point, _, _, x, y = missionFrame:GetPoint()
+    TakeMeHomeDB.missionPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(missionFrame)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(missionFrame)
+        if targetKey then
+            SnapAndLinkWindow(missionFrame, targetKey, snapX, snapY)
+        end
+    end
+end)
+
+-- Right-click to show menu
+missionDragBanner:SetScript("OnMouseUp", function(self, button)
+    if button == "RightButton" then
+        ShowBannerContextMenu(self)
+    end
+end)
+
+-- Hover to show banner when locked
+missionDragBanner:SetScript("OnEnter", function(self)
+    if TakeMeHomeDB and TakeMeHomeDB.locked then
+        missionBannerTexture:SetColorTexture(0.3, 0.6, 0.9, 0.8)
+    end
+end)
+
+missionDragBanner:SetScript("OnLeave", function(self)
+    if TakeMeHomeDB and TakeMeHomeDB.locked then
+        missionBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.0)
+    end
+end)
+
+-- Drag functionality
+missionFrame:SetScript("OnDragStart", function(self)
+    if not TakeMeHomeDB.locked then
+        StartLinkedDrag(self)
+    end
+end)
+
+missionFrame:SetScript("OnDragStop", function(self)
+    StopLinkedDrag(self)
+
+    -- Save primary window position
+    local point, _, _, x, y = self:GetPoint()
+    TakeMeHomeDB.missionPosition = { point = point, x = x, y = y }
+
+    -- Check for snap target
+    local windowKey = GetWindowKey(self)
+    if windowKey and not IsWindowLinked(windowKey) then
+        local targetKey, snapSide, snapX, snapY = FindSnapTarget(self)
+        if targetKey then
+            SnapAndLinkWindow(self, targetKey, snapX, snapY)
+        end
+    end
+end)
+
+-- Container for mission buttons
+local missionButtonContainer = CreateFrame("Frame", nil, missionFrame)
+missionButtonContainer:SetPoint("TOPLEFT", missionFrame, "TOPLEFT", 5, -15)
+missionButtonContainer:SetPoint("BOTTOMRIGHT", missionFrame, "BOTTOMRIGHT", -5, 5)
+
+-- Function to update mission drag banner
+UpdateMissionDragBanner = function()
+    if TakeMeHomeDB and TakeMeHomeDB.locked then
+        missionBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.0)
+        missionDragBanner:Show()
+        missionButtonContainer:ClearAllPoints()
+        missionButtonContainer:SetPoint("TOPLEFT", missionFrame, "TOPLEFT", 5, -5)
+        missionButtonContainer:SetPoint("BOTTOMRIGHT", missionFrame, "BOTTOMRIGHT", -5, 5)
+    else
+        missionBannerTexture:SetColorTexture(0.2, 0.5, 0.8, 0.8)
+        missionDragBanner:Show()
+        missionButtonContainer:ClearAllPoints()
+        missionButtonContainer:SetPoint("TOPLEFT", missionFrame, "TOPLEFT", 5, -15)
+        missionButtonContainer:SetPoint("BOTTOMRIGHT", missionFrame, "BOTTOMRIGHT", -5, 5)
+    end
+end
+
+local missionButtons = {}
+local missionButtonSize = 36
+local missionButtonSpacing = 6
+local missionButtonCounter = 0
+
+-- Helper function to check if a mission button is enabled
+local function IsMissionButtonEnabled(key)
+    if not TakeMeHomeDB or not TakeMeHomeDB.missionSettings then return true end
+    local settings = TakeMeHomeDB.missionSettings[key]
+    if not settings then return true end
+    return settings.enabled
+end
+
+-- Mission table definitions with expansion-specific icons
+local MISSION_TABLE_DEFINITIONS = {
+    {
+        key = "wod",
+        name = "Warlords of Draenor",
+        icon = "Interface\\Icons\\inv_garrison_resource",
+        garrisonType = 2,
+    },
+    {
+        key = "legion",
+        name = "Legion",
+        icon = "Interface\\Icons\\inv_orderhall_orderresources",
+        garrisonType = 3,
+    },
+    {
+        key = "bfa",
+        name = "Battle for Azeroth",
+        icon = "Interface\\Icons\\inv_heartofazeroth",
+        garrisonType = 9,
+    },
+    {
+        key = "shadowlands",
+        name = "Shadowlands",
+        icon = "Interface\\Icons\\spell_animarevendreth_buff",
+        garrisonType = 111,
+    },
+}
+
+-- Track which garrison type is currently shown
+local currentGarrisonType = nil
+
+-- Create a mission button (using regular button since ShowGarrisonLandingPage is not protected)
+local function CreateMissionButton(missionData)
+    missionButtonCounter = missionButtonCounter + 1
+    local button = CreateFrame("Button", "TakeMeHomeMissionBtn"..missionButtonCounter, missionButtonContainer)
+    button:SetSize(missionButtonSize, missionButtonSize)
+    button:RegisterForClicks("LeftButtonUp")
+
+    -- Store garrison type for click handler
+    button.garrisonType = missionData.garrisonType
+
+    -- Click handler with toggle logic
+    button:SetScript("OnClick", function(self)
+        if GarrisonLandingPage and GarrisonLandingPage:IsShown() and currentGarrisonType == self.garrisonType then
+            -- Same expansion is showing, hide it
+            HideUIPanel(GarrisonLandingPage)
+            currentGarrisonType = nil
+        else
+            -- Show the requested expansion
+            ShowGarrisonLandingPage(self.garrisonType)
+            currentGarrisonType = self.garrisonType
+        end
+    end)
+
+    -- Icon texture
+    button.icon = button:CreateTexture(nil, "ARTWORK")
+    button.icon:SetAllPoints()
+    button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    button.icon:SetTexture(missionData.icon)
+
+    -- Highlight texture
+    local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(1, 1, 1, 0.3)
+
+    -- Store mission data
+    button.missionKey = missionData.key
+    button.missionName = missionData.name
+
+    -- Tooltip
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(self.missionName, 1, 1, 1)
+        GameTooltip:AddLine("Open Mission Table", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+
+    button:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    return button
+end
+
+-- Update mission buttons
+UpdateMissionButtons = function()
+    -- Don't update secure buttons during combat
+    if InCombatLockdown() then return end
+
+    -- Clear existing buttons
+    for _, button in ipairs(missionButtons) do
+        button:Hide()
+        button:SetParent(nil)
+    end
+    wipe(missionButtons)
+
+    local visibleCount = 0
+    local missionColumns = 4  -- 4 buttons in a row
+
+    for i, missionDef in ipairs(MISSION_TABLE_DEFINITIONS) do
+        if IsMissionButtonEnabled(missionDef.key) then
+            local button = CreateMissionButton(missionDef)
+            table.insert(missionButtons, button)
+
+            -- Position
+            local col = visibleCount % missionColumns
+            local row = math.floor(visibleCount / missionColumns)
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", missionButtonContainer, "TOPLEFT",
+                col * (missionButtonSize + missionButtonSpacing),
+                -row * (missionButtonSize + missionButtonSpacing))
+            button:Show()
+
+            visibleCount = visibleCount + 1
+        end
+    end
+
+    -- Resize frame based on visible buttons
+    if visibleCount == 0 then
+        missionFrame:Hide()
+        return
+    end
+
+    local numRows = math.ceil(visibleCount / missionColumns)
+    local numCols = math.min(visibleCount, missionColumns)
+    local width = (numCols * missionButtonSize) + ((numCols - 1) * missionButtonSpacing) + 10
+    local bannerPadding = (TakeMeHomeDB and TakeMeHomeDB.locked) and 10 or 20
+    local height = (numRows * missionButtonSize) + ((numRows - 1) * missionButtonSpacing) + bannerPadding
+
+    missionFrame:SetSize(width, height)
+    -- Only show if user wants windows visible and not in combat/pet battle
+    if userWantsWindowsVisible  then
+        missionFrame:Show()
+    end
+    UpdateMissionDragBanner()
+end
+
+-- Initialize mission window on login
+InitializeMissions = function()
+    -- Restore position
+    if TakeMeHomeDB.missionPosition then
+        local pos = TakeMeHomeDB.missionPosition
+        missionFrame:ClearAllPoints()
+        missionFrame:SetPoint(pos.point, UIParent, pos.point, pos.x, pos.y)
+    end
+
+    -- Delay to ensure data is loaded
+    C_Timer.After(2, UpdateMissionButtons)
 end
 
 -- ============================================
@@ -3307,16 +3575,15 @@ minimapButton:SetScript("OnClick", function(self, button)
             professionFrame:Hide()
             mountsFrame:Hide()
             functionFrame:Hide()
+            missionFrame:Hide()
             userWantsWindowsVisible = false
         else
             userWantsWindowsVisible = true
-            -- Only show if not in combat or pet battle
-            if not isInCombatOrPetBattle then
-                mainFrame:Show()
-                professionFrame:Show()
-                mountsFrame:Show()
-                functionFrame:Show()
-            end
+            mainFrame:Show()
+            professionFrame:Show()
+            mountsFrame:Show()
+            functionFrame:Show()
+            missionFrame:Show()
         end
     elseif button == "RightButton" then
         -- Open settings
