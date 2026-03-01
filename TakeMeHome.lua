@@ -6,6 +6,7 @@ local TRAVEL_ITEMS = {
     { itemID = 6948,   name = "Hearthstone", isToy = false, settingsKey = "hearthstone" },
     { itemID = 140192, name = "Dalaran Hearthstone", isToy = true, settingsKey = "dalaran_hearthstone" },
     { itemID = 110560, name = "Garrison Hearthstone", isToy = true, settingsKey = "garrison_hearthstone" },
+    { itemID = 253629, name = "Personal Key to the Arcantina", isToy = true, settingsKey = "arcantina_key" },
 }
 
 -- Alternative toy hearthstones (used when regular hearthstone is not in bags)
@@ -69,6 +70,7 @@ local BUTTON_DEFINITIONS = {
     { key = "hearthstone", name = "Hearthstone", row = 1 },
     { key = "dalaran_hearthstone", name = "Dalaran Hearthstone", row = 1 },
     { key = "garrison_hearthstone", name = "Garrison Hearthstone", row = 1 },
+    { key = "arcantina_key", name = "Personal Key to the Arcantina", row = 1 },
     { key = "druid_teleport", name = "Dreamwalk", row = 1, classRestricted = "DRUID" },
     -- Row 2: Utilities
     { key = "mailbox", name = "Mailbox", row = 2 },
@@ -90,10 +92,11 @@ local defaults = {
         hearthstone = { enabled = true, order = 1 },
         dalaran_hearthstone = { enabled = true, order = 2 },
         garrison_hearthstone = { enabled = true, order = 3 },
-        druid_teleport = { enabled = true, order = 4 },
-        mailbox = { enabled = true, order = 5 },
-        warband_bank = { enabled = true, order = 6 },
-        mobile_banking = { enabled = true, order = 7 },
+        arcantina_key = { enabled = true, order = 4 },
+        druid_teleport = { enabled = true, order = 5 },
+        mailbox = { enabled = true, order = 6 },
+        warband_bank = { enabled = true, order = 7 },
+        mobile_banking = { enabled = true, order = 8 },
     },
     professionSettings = {
         -- Will be populated dynamically based on learned professions

@@ -1,5 +1,9 @@
 # TakeMeHome Changelog
 
+## [1.7.0] - 2025-03-01
+### Added
+- Personal Key to the Arcantina (item ID 253629) to the top row of the Hearthstone window
+
 ## [1.6.0] - 2025-02-05
 ### Added
 - **Mission Table Window**: Quick access to expansion mission tables
