@@ -1,5 +1,19 @@
 # TakeMeHome Changelog
 
+## [2.4.0] - 2026-06-04
+### Added
+- **Rich tooltips** on all info bar modules — hover any module for a detailed breakdown:
+  - Gold: full g/s/c values
+  - Bags: per-bag free slot count
+  - Durability: per-slot percentages (head, chest, legs, etc.)
+  - Session Gold: net +/- with session starting gold
+  - Friends: online friends list (up to 10 names)
+  - Reputation: current value and progress to next standing
+  - HS Cooldown: each hearthstone with exact time remaining
+  - Spec: all specs listed with current one marked
+  - Item Level: equipped vs overall split
+  - Keystone: full dungeon name and key level
+
 ## [2.3.0] - 2026-06-04
 ### Added
 - **Quick-cast bar buttons** — two icon buttons on the bottom bar after the ATT button:

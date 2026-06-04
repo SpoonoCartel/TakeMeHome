@@ -240,6 +240,115 @@ local sessionGoldStart = nil
 -- Last coordinate string (updated each tick, used by right-click copy)
 local lastCoordsString = ""
 
+-- Rich tooltip builders per module key — return nothing, but call GameTooltip:AddLine etc.
+local INFO_MODULE_RICH_TIPS = {
+    gold = function()
+        local money = GetMoney()
+        local g = math.floor(money / 10000)
+        local s = math.floor((money % 10000) / 100)
+        local c = money % 100
+        GameTooltip:AddLine(string.format("|cffd4af37%dg|r |cffc0c0c0%ds|r |cffcd7f32%dc|r", g, s, c))
+    end,
+    sessionGold = function()
+        if not sessionGoldStart then return end
+        local delta = GetMoney() - sessionGoldStart
+        local abs   = math.abs(delta)
+        local g = math.floor(abs / 10000)
+        local s = math.floor((abs % 10000) / 100)
+        local c = abs % 100
+        local sign  = delta >= 0 and "|cff44ff44+" or "|cffff4444-"
+        GameTooltip:AddLine(string.format("Session: %s%dg %ds %dc|r", sign, g, s, c))
+        GameTooltip:AddLine(string.format("Started with: %dg", math.floor(sessionGoldStart / 10000)), 0.6, 0.6, 0.6)
+    end,
+    bags = function()
+        for i = 0, 4 do
+            local free  = GetContainerNumFreeSlots(i)
+            local total = GetContainerNumSlots(i)
+            if total > 0 then
+                local color = free == 0 and "|cffff4444" or free <= 4 and "|cffffff44" or "|cffaaaaaa"
+                GameTooltip:AddLine(string.format("Bag %d: %s%d|r / %d free", i, color, free, total))
+            end
+        end
+    end,
+    durability = function()
+        local slots = {
+            {1,  "Head"}, {3, "Shoulder"}, {5, "Chest"}, {6, "Waist"},
+            {7, "Legs"}, {8, "Feet"}, {9, "Wrist"}, {10, "Hands"},
+            {16, "Main Hand"}, {17, "Off Hand"},
+        }
+        for _, slot in ipairs(slots) do
+            local cur, max = GetInventoryItemDurability(slot[1])
+            if cur and max and max > 0 then
+                local pct = math.floor(cur / max * 100)
+                local color = pct <= 20 and "|cffff4444" or pct <= 50 and "|cffffff44" or "|cff44ff44"
+                GameTooltip:AddLine(string.format("%-12s %s%d%%|r", slot[2], color, pct))
+            end
+        end
+    end,
+    friends = function()
+        local onF = C_FriendList.GetNumOnlineFriends()
+        local totF = C_FriendList.GetNumFriends()
+        GameTooltip:AddLine(string.format("Friends online: |cff44ff44%d|r / %d", onF, totF))
+        for i = 1, math.min(onF, 10) do
+            local info = C_FriendList.GetFriendInfoByIndex(i)
+            if info and info.connected then
+                GameTooltip:AddLine("  " .. (info.name or "?"), 0.8, 0.8, 1)
+            end
+        end
+        if onF > 10 then GameTooltip:AddLine(string.format("  ... and %d more", onF - 10), 0.5, 0.5, 0.5) end
+    end,
+    rep = function()
+        local ok, d = pcall(function() return C_Reputation and C_Reputation.GetWatchedFactionData and C_Reputation.GetWatchedFactionData() end)
+        if ok and d and d.name then
+            local cur = (d.currentValue or 0) - (d.currentReactionThreshold or 0)
+            local max = (d.nextReactionThreshold or 1) - (d.currentReactionThreshold or 0)
+            if max > 0 then
+                GameTooltip:AddLine(d.name, 1, 1, 1)
+                GameTooltip:AddLine(string.format("%d / %d  (%.1f%%)", cur, max, cur/max*100), 0.7, 0.9, 1)
+                GameTooltip:AddLine(string.format("Total: %d", d.currentValue or 0), 0.5, 0.5, 0.5)
+            end
+        end
+    end,
+    hsCooldown = function()
+        for _, item in ipairs(TRAVEL_ITEMS) do
+            local ok, start, dur = pcall(GetItemCooldown, item.itemID)
+            local rem = (ok and dur and dur > 0) and math.max(0, start + dur - GetTime()) or 0
+            local status = rem > 0
+                and string.format("|cffff8844%dm %02ds|r", math.floor(rem/60), math.floor(rem%60))
+                or "|cff44ff44Ready|r"
+            GameTooltip:AddLine(item.name .. ": " .. status)
+        end
+    end,
+    spec = function()
+        local cur = GetSpecialization()
+        local num = GetNumSpecializations()
+        for i = 1, (num or 0) do
+            local _, name, _, icon = GetSpecializationInfo(i)
+            local marker = i == cur and " |cff44ff44◄|r" or ""
+            GameTooltip:AddLine((name or "?") .. marker)
+        end
+    end,
+    ilvl = function()
+        local equipped, overall = GetAverageItemLevel()
+        GameTooltip:AddLine(string.format("Equipped: |cffffffff%.1f|r", equipped or 0))
+        GameTooltip:AddLine(string.format("Overall:  |cff888888%.1f|r", overall or 0))
+    end,
+    keystone = function()
+        local ok1, level = pcall(C_MythicPlus.GetOwnedKeystoneLevel)
+        local ok2, mapID = pcall(C_MythicPlus.GetOwnedKeystoneMapID)
+        if ok1 and level then
+            local name = ""
+            if ok2 and mapID then
+                local ok3, info = pcall(C_Map.GetMapInfo, mapID)
+                if ok3 and info then name = info.name end
+            end
+            GameTooltip:AddLine(string.format("|cff44ff44+%d|r %s", level, name))
+        else
+            GameTooltip:AddLine("No keystone in bags", 0.6, 0.6, 0.6)
+        end
+    end,
+}
+
 local INFO_MODULE_ACTIONS = {
     zone        = function() pcall(ToggleWorldMap) end,
     coords      = function() pcall(ToggleWorldMap) end,
@@ -3750,8 +3859,10 @@ local function CreateInfoModuleBtn(key, section, barFrame)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             local rawText = self.lbl:GetText() or ""
             GameTooltip:SetText(rawText:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""), 1, 1, 1)
+            local richFn = INFO_MODULE_RICH_TIPS and INFO_MODULE_RICH_TIPS[self.modKey]
+            if richFn then pcall(richFn) end
             local tip = INFO_MODULE_TIPS[self.modKey]
-            if tip then GameTooltip:AddLine(tip, 0.6, 0.6, 0.6) end
+            if tip then GameTooltip:AddLine(" "); GameTooltip:AddLine(tip, 0.5, 0.5, 0.5) end
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
