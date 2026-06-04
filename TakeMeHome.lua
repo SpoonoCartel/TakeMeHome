@@ -62,7 +62,8 @@ local INFO_BAR_MODULES = {
     { key = "durability",  name = "Durability",   section = "center", order = 7  },
     { key = "xp",          name = "XP",           section = "center", order = 8  },
     { key = "sessionGold", name = "Session Gold", section = "center", order = 9  },
-    { key = "memory",      name = "Memory",       section = "right",  order = 10 },
+
+    { key = "hsCooldown",  name = "HS Cooldown",  section = "left",   order = 10 },
     { key = "fps",         name = "FPS",          section = "right",  order = 11 },
     { key = "latency",     name = "Latency",      section = "right",  order = 12 },
     { key = "timeLocal",   name = "Local Time",   section = "right",  order = 13 },
@@ -181,7 +182,8 @@ local defaults = {
             durability =  { enabled = true,  order = 7  },
             xp =          { enabled = false, order = 8  },
             sessionGold = { enabled = true,  order = 9  },
-            memory =      { enabled = false, order = 10 },
+
+            hsCooldown =  { enabled = true,  order = 10 },
             fps =         { enabled = true,  order = 11 },
             latency =     { enabled = true,  order = 12 },
             timeLocal =   { enabled = true,  order = 13 },
@@ -230,23 +232,51 @@ local windowHiddenByBar = {}
 local sessionGoldStart = nil
 
 -- Click actions and tooltips for info bar modules
+-- Last coordinate string (updated each tick, used by right-click copy)
+local lastCoordsString = ""
+
 local INFO_MODULE_ACTIONS = {
-    zone       = function() pcall(ToggleWorldMap) end,
-    coords     = function() pcall(ToggleWorldMap) end,
-    gold       = function() pcall(OpenAllBags) end,
-    bags       = function() pcall(OpenAllBags) end,
-    durability = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
-    ilvl       = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
-    time       = function() pcall(ToggleCalendar) end,
-    timeLocal  = function() pcall(ToggleCalendar) end,
-    friends    = function() pcall(function() ToggleFriendsFrame(1) end) end,
-    rep        = function() pcall(function() ToggleCharacter("ReputationFrame") end) end,
+    zone        = function() pcall(ToggleWorldMap) end,
+    coords      = function() pcall(ToggleWorldMap) end,
+    gold        = function() pcall(OpenAllBags) end,
+    bags        = function() pcall(OpenAllBags) end,
+    durability  = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
+    ilvl        = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
+    time        = function() pcall(ToggleCalendar) end,
+    timeLocal   = function() pcall(ToggleCalendar) end,
+    friends     = function() pcall(function() ToggleFriendsFrame(1) end) end,
+    rep         = function() pcall(function() ToggleCharacter("ReputationFrame") end) end,
     sessionGold = function() pcall(OpenAllBags) end,
+    hsCooldown  = function() if mainFrame:IsShown() then mainFrame:Hide() else mainFrame:Show() end end,
+}
+
+-- Right-click actions for modules that support it
+local INFO_MODULE_RIGHT_ACTIONS = {
+    coords = function()
+        local mapID = C_Map.GetBestMapForUnit("player")
+        if not mapID then return end
+        local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+        if not pos then return end
+        local coordStr = string.format("%.1f, %.1f", pos.x * 100, pos.y * 100)
+        if TomTom and TomTom.AddWaypoint then
+            pcall(function()
+                TomTom:AddWaypoint(mapID, pos.x, pos.y, {
+                    title = "TakeMeHome: " .. coordStr,
+                    persistent = false,
+                    minimap = true,
+                    world = true,
+                })
+            end)
+            print("|cff00ff00TakeMeHome|r: TomTom waypoint set at |cff00ffff" .. coordStr .. "|r")
+        else
+            ChatFrame_OpenChat(coordStr)
+        end
+    end,
 }
 
 local INFO_MODULE_TIPS = {
     zone        = "Click to open Map",
-    coords      = "Click to open Map",
+    coords      = "Click to open Map  |cff888888Right-click: TomTom waypoint (or share in chat)|r",
     gold        = "Click to open Bags",
     bags        = "Click to open Bags",
     durability  = "Click to open Character",
@@ -256,6 +286,7 @@ local INFO_MODULE_TIPS = {
     friends     = "Click to open Friends List",
     rep         = "Click to open Reputations",
     sessionGold = "Click to open Bags",
+    hsCooldown  = "Click to toggle Travel window",
 }
 
 -- ============================================
@@ -1998,6 +2029,7 @@ local function CreateConfigPanel()
     -- Section content frames (only one shown at a time)
     local sections = {}
     local navButtons = {}
+    local navSectionCount = 0
     local activeSection = nil
 
     local function ShowSection(key)
@@ -2020,7 +2052,8 @@ local function CreateConfigPanel()
         sections[key] = sec
 
         -- Nav button
-        local yPos = -(28 * (#navButtons))
+        local yPos = -(28 * navSectionCount)
+        navSectionCount = navSectionCount + 1
         local navBtn = CreateFrame("Button", nil, navPanel, "BackdropTemplate")
         navBtn:SetSize(NAV_W, 28)
         navBtn:SetPoint("TOPLEFT", navPanel, "TOPLEFT", 0, yPos)
@@ -2061,7 +2094,7 @@ local function CreateConfigPanel()
         scaleLabel:SetText("Window Scale")
         y = y - 22
 
-        local slider = CreateFrame("Slider", nil, genSec, "OptionsSliderTemplate")
+        local slider = CreateFrame("Slider", "TakeMeHomeConfigScaleSlider", genSec, "OptionsSliderTemplate")
         slider:SetPoint("TOPLEFT", genSec, "TOPLEFT", 4, y)
         slider:SetWidth(280)
         slider:SetMinMaxValues(0.4, 1.5)
@@ -2476,823 +2509,6 @@ local function CreateConfigPanel()
     configFrame:Show()
 end
 
-    configFrame = CreateFrame("Frame", "TakeMeHomeConfig", UIParent, "BackdropTemplate")
-    configFrame:SetSize(380, 440)
-    configFrame:SetPoint("CENTER")
-    configFrame:SetMovable(true)
-    configFrame:EnableMouse(true)
-    configFrame:RegisterForDrag("LeftButton")
-    configFrame:SetClampedToScreen(true)
-    configFrame:SetFrameStrata("DIALOG")
-
-    -- Modern dark backdrop
-    configFrame:SetBackdrop({
-        bgFile = "Interface\\BUTTONS\\WHITE8X8",
-        edgeFile = "Interface\\BUTTONS\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 }
-    })
-    configFrame:SetBackdropColor(0.08, 0.08, 0.1, 0.95)
-    configFrame:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
-
-    configFrame:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    configFrame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
-
-    -- Title bar background
-    local titleBar = configFrame:CreateTexture(nil, "ARTWORK")
-    titleBar:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 1, -1)
-    titleBar:SetPoint("TOPRIGHT", configFrame, "TOPRIGHT", -1, -1)
-    titleBar:SetHeight(28)
-    titleBar:SetColorTexture(0.15, 0.15, 0.18, 1)
-
-    -- Title
-    local title = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", configFrame, "TOP", 0, -8)
-    title:SetText("|cff4da6ffTakeMeHome|r Settings")
-
-    -- Close button
-    local closeButton = CreateFrame("Button", nil, configFrame)
-    closeButton:SetSize(20, 20)
-    closeButton:SetPoint("TOPRIGHT", configFrame, "TOPRIGHT", -5, -5)
-    closeButton:SetNormalFontObject("GameFontNormal")
-    closeButton:SetText("x")
-
-    local closeBg = closeButton:CreateTexture(nil, "BACKGROUND")
-    closeBg:SetAllPoints()
-    closeBg:SetColorTexture(0.5, 0.2, 0.2, 0)
-
-    closeButton:SetScript("OnEnter", function(self) closeBg:SetColorTexture(0.7, 0.2, 0.2, 0.8) end)
-    closeButton:SetScript("OnLeave", function(self) closeBg:SetColorTexture(0.5, 0.2, 0.2, 0) end)
-    closeButton:SetScript("OnClick", function(self) configFrame:Hide() end)
-
-    -- Helper function to create modern button
-    local function CreateModernButton(parent, width, text)
-        local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(width, 20)
-        btn:SetBackdrop({
-            bgFile = "Interface\\BUTTONS\\WHITE8X8",
-            edgeFile = "Interface\\BUTTONS\\WHITE8X8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(0.2, 0.2, 0.25, 1)
-        btn:SetBackdropBorderColor(0.4, 0.4, 0.45, 1)
-
-        btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        btn.text:SetPoint("CENTER")
-        btn.text:SetText(text)
-
-        btn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.3, 0.5, 0.7, 1)
-        end)
-        btn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.2, 0.2, 0.25, 1)
-        end)
-
-        return btn
-    end
-
-    -- Tab buttons container
-    local tabContainer = CreateFrame("Frame", nil, configFrame)
-    tabContainer:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -32)
-    tabContainer:SetPoint("TOPRIGHT", configFrame, "TOPRIGHT", -10, -32)
-    tabContainer:SetHeight(28)
-
-    -- Content frames for each tab
-    local travelContent = CreateFrame("Frame", nil, configFrame)
-    travelContent:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -65)
-    travelContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
-
-    local professionsContent = CreateFrame("Frame", nil, configFrame)
-    professionsContent:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -65)
-    professionsContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
-    professionsContent:Hide()
-
-    local mountsContent = CreateFrame("Frame", nil, configFrame)
-    mountsContent:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -65)
-    mountsContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
-    mountsContent:Hide()
-
-    local functionContent = CreateFrame("Frame", nil, configFrame)
-    functionContent:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -65)
-    functionContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
-    functionContent:Hide()
-
-    local infoBarContent = CreateFrame("Frame", nil, configFrame)
-    infoBarContent:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -65)
-    infoBarContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
-    infoBarContent:Hide()
-
-    local contentFrames = { travelContent, professionsContent, mountsContent, functionContent, infoBarContent }
-    local tabButtons = {}
-
-    -- Create tab button helper
-    local function CreateTabButton(parent, text, index)
-        local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(68, 24)
-        btn:SetBackdrop({
-            bgFile = "Interface\\BUTTONS\\WHITE8X8",
-            edgeFile = "Interface\\BUTTONS\\WHITE8X8",
-            edgeSize = 1,
-        })
-        btn:SetBackdropColor(0.15, 0.15, 0.18, 1)
-        btn:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
-
-        btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        btn.text:SetPoint("CENTER")
-        btn.text:SetText(text)
-
-        btn.index = index
-        btn.isActive = false
-
-        btn:SetScript("OnClick", function(self)
-            -- Hide all content frames
-            for _, frame in ipairs(contentFrames) do
-                frame:Hide()
-            end
-            -- Show selected content
-            contentFrames[self.index]:Show()
-            -- Update tab appearances
-            for _, tabBtn in ipairs(tabButtons) do
-                if tabBtn.index == self.index then
-                    tabBtn:SetBackdropColor(0.2, 0.5, 0.8, 1)
-                    tabBtn.isActive = true
-                else
-                    tabBtn:SetBackdropColor(0.15, 0.15, 0.18, 1)
-                    tabBtn.isActive = false
-                end
-            end
-        end)
-
-        btn:SetScript("OnEnter", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(0.25, 0.25, 0.3, 1)
-            end
-        end)
-
-        btn:SetScript("OnLeave", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(0.15, 0.15, 0.18, 1)
-            end
-        end)
-
-        return btn
-    end
-
-    -- Create tab buttons
-    local travelTab = CreateTabButton(tabContainer, "Travel", 1)
-    travelTab:SetPoint("LEFT", tabContainer, "LEFT", 0, 0)
-    travelTab:SetBackdropColor(0.2, 0.5, 0.8, 1)
-    travelTab.isActive = true
-    table.insert(tabButtons, travelTab)
-
-    local professionsTab = CreateTabButton(tabContainer, "Professions", 2)
-    professionsTab:SetPoint("LEFT", travelTab, "RIGHT", 5, 0)
-    table.insert(tabButtons, professionsTab)
-
-    local mountsTab = CreateTabButton(tabContainer, "Mounts", 3)
-    mountsTab:SetPoint("LEFT", professionsTab, "RIGHT", 5, 0)
-    table.insert(tabButtons, mountsTab)
-
-    local functionTab = CreateTabButton(tabContainer, "Function", 4)
-    functionTab:SetPoint("LEFT", mountsTab, "RIGHT", 5, 0)
-    table.insert(tabButtons, functionTab)
-
-    local barTab = CreateTabButton(tabContainer, "Bar", 5)
-    barTab:SetPoint("LEFT", functionTab, "RIGHT", 5, 0)
-    table.insert(tabButtons, barTab)
-
-    -- =====================
-    -- TRAVEL TAB CONTENT
-    -- =====================
-    local travelYOffset = 0
-    for i, def in ipairs(BUTTON_DEFINITIONS) do
-        local row = CreateFrame("Frame", nil, travelContent, "BackdropTemplate")
-        row:SetSize(300, 30)
-        row:SetPoint("TOPLEFT", travelContent, "TOPLEFT", 0, travelYOffset)
-
-        row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-        row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
-
-        local checkbox = CreateFrame("CheckButton", "TakeMeHomeTravelCheck"..def.key, row, "UICheckButtonTemplate")
-        checkbox:SetPoint("LEFT", row, "LEFT", 5, 0)
-        checkbox:SetChecked(TakeMeHomeDB.buttonSettings[def.key].enabled)
-        checkbox.key = def.key
-
-        checkbox:SetScript("OnClick", function(self)
-            TakeMeHomeDB.buttonSettings[self.key].enabled = self:GetChecked()
-            UpdateAllButtons()
-        end)
-
-        local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        label:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
-        label:SetWidth(120)
-        label:SetJustifyH("LEFT")
-        label:SetText(def.name)
-
-        local rowLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        rowLabel:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-        rowLabel:SetText("Row " .. def.row)
-        rowLabel:SetTextColor(0.5, 0.5, 0.55)
-
-        -- Up/Down buttons
-        local downBtn = CreateModernButton(row, 24, "v")
-        downBtn:SetPoint("RIGHT", rowLabel, "LEFT", -8, 0)
-        downBtn.index = i
-
-        local upBtn = CreateModernButton(row, 24, "^")
-        upBtn:SetPoint("RIGHT", downBtn, "LEFT", -4, 0)
-        upBtn.index = i
-
-        upBtn:SetScript("OnClick", function(self)
-            if self.index > 1 then
-                local currentKey = BUTTON_DEFINITIONS[self.index].key
-                local prevKey = BUTTON_DEFINITIONS[self.index - 1].key
-                local currentOrder = TakeMeHomeDB.buttonSettings[currentKey].order
-                local prevOrder = TakeMeHomeDB.buttonSettings[prevKey].order
-                TakeMeHomeDB.buttonSettings[currentKey].order = prevOrder
-                TakeMeHomeDB.buttonSettings[prevKey].order = currentOrder
-                UpdateAllButtons()
-            end
-        end)
-
-        downBtn:SetScript("OnClick", function(self)
-            if self.index < #BUTTON_DEFINITIONS then
-                local currentKey = BUTTON_DEFINITIONS[self.index].key
-                local nextKey = BUTTON_DEFINITIONS[self.index + 1].key
-                local currentOrder = TakeMeHomeDB.buttonSettings[currentKey].order
-                local nextOrder = TakeMeHomeDB.buttonSettings[nextKey].order
-                TakeMeHomeDB.buttonSettings[currentKey].order = nextOrder
-                TakeMeHomeDB.buttonSettings[nextKey].order = currentOrder
-                UpdateAllButtons()
-            end
-        end)
-
-        travelYOffset = travelYOffset - 32
-    end
-
-    -- =====================
-    -- PROFESSIONS TAB CONTENT
-    -- =====================
-    local function RefreshProfessionsTab()
-        -- Clear existing children
-        for _, child in ipairs({professionsContent:GetChildren()}) do
-            child:Hide()
-            child:SetParent(nil)
-        end
-
-        local professions = GetLearnedProfessions()
-
-        -- Initialize settings for any new professions
-        for i, prof in ipairs(professions) do
-            if not TakeMeHomeDB.professionSettings[prof.name] then
-                TakeMeHomeDB.professionSettings[prof.name] = { enabled = true, order = i }
-            end
-        end
-
-        -- Sort by current order
-        table.sort(professions, function(a, b)
-            return GetProfessionOrder(a.name) < GetProfessionOrder(b.name)
-        end)
-
-        if #professions == 0 then
-            local noProf = professionsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            noProf:SetPoint("CENTER")
-            noProf:SetText("No crafting professions learned")
-            noProf:SetTextColor(0.5, 0.5, 0.5)
-            return
-        end
-
-        local yOffset = 0
-        for i, prof in ipairs(professions) do
-            local row = CreateFrame("Frame", nil, professionsContent, "BackdropTemplate")
-            row:SetSize(300, 30)
-            row:SetPoint("TOPLEFT", professionsContent, "TOPLEFT", 0, yOffset)
-
-            row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-            row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
-
-            local checkbox = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-            checkbox:SetPoint("LEFT", row, "LEFT", 5, 0)
-            checkbox:SetChecked(IsProfessionEnabled(prof.name))
-            checkbox.profName = prof.name
-
-            checkbox:SetScript("OnClick", function(self)
-                TakeMeHomeDB.professionSettings[self.profName].enabled = self:GetChecked()
-                UpdateProfessionButtons()
-            end)
-
-            -- Icon
-            local icon = row:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(20, 20)
-            icon:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
-            icon:SetTexture(prof.icon)
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            label:SetPoint("LEFT", icon, "RIGHT", 5, 0)
-            label:SetWidth(120)
-            label:SetJustifyH("LEFT")
-            label:SetText(prof.name)
-
-            -- Up/Down buttons
-            local downBtn = CreateModernButton(row, 24, "v")
-            downBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            downBtn.profName = prof.name
-            downBtn.index = i
-            downBtn.professions = professions
-
-            local upBtn = CreateModernButton(row, 24, "^")
-            upBtn:SetPoint("RIGHT", downBtn, "LEFT", -4, 0)
-            upBtn.profName = prof.name
-            upBtn.index = i
-            upBtn.professions = professions
-
-            upBtn:SetScript("OnClick", function(self)
-                if self.index > 1 then
-                    local currentName = self.profName
-                    local prevName = self.professions[self.index - 1].name
-                    local currentOrder = TakeMeHomeDB.professionSettings[currentName].order
-                    local prevOrder = TakeMeHomeDB.professionSettings[prevName].order
-                    TakeMeHomeDB.professionSettings[currentName].order = prevOrder
-                    TakeMeHomeDB.professionSettings[prevName].order = currentOrder
-                    UpdateProfessionButtons()
-                    RefreshProfessionsTab()
-                end
-            end)
-
-            downBtn:SetScript("OnClick", function(self)
-                if self.index < #self.professions then
-                    local currentName = self.profName
-                    local nextName = self.professions[self.index + 1].name
-                    local currentOrder = TakeMeHomeDB.professionSettings[currentName].order
-                    local nextOrder = TakeMeHomeDB.professionSettings[nextName].order
-                    TakeMeHomeDB.professionSettings[currentName].order = nextOrder
-                    TakeMeHomeDB.professionSettings[nextName].order = currentOrder
-                    UpdateProfessionButtons()
-                    RefreshProfessionsTab()
-                end
-            end)
-
-            yOffset = yOffset - 32
-        end
-    end
-
-    -- Refresh professions when tab is shown
-    professionsTab:HookScript("OnClick", RefreshProfessionsTab)
-
-    -- =====================
-    -- MOUNTS TAB CONTENT
-    -- =====================
-    local mountSearchResults = {}
-    local maxMounts = 6
-
-    local function RefreshMountsTab()
-        -- Clear existing children (frames)
-        for _, child in ipairs({mountsContent:GetChildren()}) do
-            child:Hide()
-            child:SetParent(nil)
-        end
-        -- Clear existing regions (fontstrings, textures)
-        for _, region in ipairs({mountsContent:GetRegions()}) do
-            region:Hide()
-            region:SetParent(nil)
-        end
-
-        local selectedMounts = TakeMeHomeDB.selectedMounts or {}
-        local yOffset = 0
-
-        -- Header: Selected Mounts (X/6)
-        local header = mountsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        header:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
-        header:SetText(string.format("Selected Mounts (%d/%d)", #selectedMounts, maxMounts))
-        header:SetTextColor(0.4, 0.6, 1)
-        yOffset = yOffset - 20
-
-        -- Show selected mounts
-        for i, mountEntry in ipairs(selectedMounts) do
-            local name, icon, isCollected = GetMountInfoBySpellID(mountEntry.spellID)
-
-            local row = CreateFrame("Frame", nil, mountsContent, "BackdropTemplate")
-            row:SetSize(300, 26)
-            row:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
-            row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-            row:SetBackdropColor(0.08, 0.08, 0.1, (i % 2 == 0) and 0.95 or 0.85)
-
-            -- Icon
-            local iconTex = row:CreateTexture(nil, "ARTWORK")
-            iconTex:SetSize(20, 20)
-            iconTex:SetPoint("LEFT", row, "LEFT", 5, 0)
-            if icon then iconTex:SetTexture(icon) end
-            iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            if not isCollected then iconTex:SetDesaturated(true) end
-
-            -- Name
-            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            label:SetPoint("LEFT", iconTex, "RIGHT", 5, 0)
-            label:SetWidth(140)
-            label:SetJustifyH("LEFT")
-            label:SetText(name or "Unknown Mount")
-            if not isCollected then label:SetTextColor(0.5, 0.5, 0.5) end
-
-            -- Remove button
-            local removeBtn = CreateModernButton(row, 20, "x")
-            removeBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            removeBtn.index = i
-            removeBtn:SetScript("OnClick", function(self)
-                table.remove(TakeMeHomeDB.selectedMounts, self.index)
-                UpdateMountButtons()
-                RefreshMountsTab()
-            end)
-
-            -- Down button
-            local downBtn = CreateModernButton(row, 20, "v")
-            downBtn:SetPoint("RIGHT", removeBtn, "LEFT", -2, 0)
-            downBtn.index = i
-            downBtn:SetScript("OnClick", function(self)
-                if self.index < #TakeMeHomeDB.selectedMounts then
-                    local temp = TakeMeHomeDB.selectedMounts[self.index]
-                    TakeMeHomeDB.selectedMounts[self.index] = TakeMeHomeDB.selectedMounts[self.index + 1]
-                    TakeMeHomeDB.selectedMounts[self.index + 1] = temp
-                    UpdateMountButtons()
-                    RefreshMountsTab()
-                end
-            end)
-
-            -- Up button
-            local upBtn = CreateModernButton(row, 20, "^")
-            upBtn:SetPoint("RIGHT", downBtn, "LEFT", -2, 0)
-            upBtn.index = i
-            upBtn:SetScript("OnClick", function(self)
-                if self.index > 1 then
-                    local temp = TakeMeHomeDB.selectedMounts[self.index]
-                    TakeMeHomeDB.selectedMounts[self.index] = TakeMeHomeDB.selectedMounts[self.index - 1]
-                    TakeMeHomeDB.selectedMounts[self.index - 1] = temp
-                    UpdateMountButtons()
-                    RefreshMountsTab()
-                end
-            end)
-
-            yOffset = yOffset - 28
-        end
-
-        -- Only show Add Mount section if less than max mounts selected
-        if #selectedMounts >= maxMounts then
-            return  -- Don't show search section when at max capacity
-        end
-
-        -- Spacer
-        yOffset = yOffset - 15
-
-        -- Search section header
-        local searchHeader = mountsContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        searchHeader:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
-        searchHeader:SetText("Add Mount")
-        searchHeader:SetTextColor(0.4, 0.6, 1)
-        yOffset = yOffset - 22
-
-        -- Search box
-        local searchBox = CreateFrame("EditBox", "TakeMeHomeMountSearch", mountsContent, "InputBoxTemplate")
-        searchBox:SetSize(290, 22)
-        searchBox:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 8, yOffset)
-        searchBox:SetAutoFocus(false)
-        searchBox:SetMaxLetters(50)
-        yOffset = yOffset - 28
-
-        -- Search results container
-        local resultsContainer = CreateFrame("Frame", nil, mountsContent)
-        resultsContainer:SetPoint("TOPLEFT", mountsContent, "TOPLEFT", 0, yOffset)
-        resultsContainer:SetSize(300, 150)
-
-        local function DisplaySearchResults(searchText)
-            -- Clear previous results
-            for _, child in ipairs({resultsContainer:GetChildren()}) do
-                child:Hide()
-                child:SetParent(nil)
-            end
-
-            if not searchText or searchText == "" then return end
-
-            searchText = searchText:lower()
-            local results = {}
-            local mountIDs = C_MountJournal.GetMountIDs()
-
-            for _, mountID in ipairs(mountIDs) do
-                local name, spellID, icon, _, isUsable, _, _, _, _, _, isCollected = C_MountJournal.GetMountInfoByID(mountID)
-                if isCollected and name and name:lower():find(searchText, 1, true) then
-                    -- Check if not already selected
-                    local alreadySelected = false
-                    for _, sel in ipairs(TakeMeHomeDB.selectedMounts) do
-                        if sel.spellID == spellID then
-                            alreadySelected = true
-                            break
-                        end
-                    end
-                    if not alreadySelected then
-                        table.insert(results, { name = name, spellID = spellID, icon = icon, mountID = mountID })
-                    end
-                end
-                if #results >= 5 then break end  -- Limit results
-            end
-
-            local resY = 0
-            for i, result in ipairs(results) do
-                local row = CreateFrame("Frame", nil, resultsContainer, "BackdropTemplate")
-                row:SetSize(295, 24)
-                row:SetPoint("TOPLEFT", resultsContainer, "TOPLEFT", 0, resY)
-                row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-                row:SetBackdropColor(0.15, 0.15, 0.18, 0.8)
-
-                local iconTex = row:CreateTexture(nil, "ARTWORK")
-                iconTex:SetSize(18, 18)
-                iconTex:SetPoint("LEFT", row, "LEFT", 5, 0)
-                iconTex:SetTexture(result.icon)
-                iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-                local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                label:SetPoint("LEFT", iconTex, "RIGHT", 5, 0)
-                label:SetWidth(180)
-                label:SetJustifyH("LEFT")
-                label:SetText(result.name)
-
-                -- Add button
-                local addBtn = CreateModernButton(row, 30, "+")
-                addBtn:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-                addBtn.spellID = result.spellID
-                addBtn:SetScript("OnClick", function(self)
-                    if #TakeMeHomeDB.selectedMounts >= maxMounts then
-                        print("|cff00ff00TakeMeHome|r: Maximum of " .. maxMounts .. " mounts reached.")
-                        return
-                    end
-                    table.insert(TakeMeHomeDB.selectedMounts, { spellID = self.spellID })
-                    UpdateMountButtons()
-                    searchBox:SetText("")
-                    RefreshMountsTab()
-                end)
-
-                resY = resY - 26
-            end
-
-            if #results == 0 and searchText ~= "" then
-                local noResults = resultsContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                noResults:SetPoint("TOPLEFT", resultsContainer, "TOPLEFT", 5, 0)
-                noResults:SetText("No matching mounts found")
-                noResults:SetTextColor(0.5, 0.5, 0.5)
-            end
-        end
-
-        searchBox:SetScript("OnTextChanged", function(self)
-            DisplaySearchResults(self:GetText())
-        end)
-
-        searchBox:SetScript("OnEnterPressed", function(self)
-            self:ClearFocus()
-        end)
-
-        searchBox:SetScript("OnEscapePressed", function(self)
-            self:SetText("")
-            self:ClearFocus()
-        end)
-    end
-
-    -- Refresh mounts when tab is shown
-    mountsTab:HookScript("OnClick", RefreshMountsTab)
-
-    -- =====================
-    -- FUNCTION TAB CONTENT
-    -- =====================
-    local FUNCTION_DEFINITIONS = {
-        { key = "logout", name = "Logout", icon = "Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up" },
-    }
-
-    local function IsFunctionEnabled(key)
-        if not TakeMeHomeDB or not TakeMeHomeDB.functionSettings then return true end
-        local settings = TakeMeHomeDB.functionSettings[key]
-        if not settings then return true end
-        return settings.enabled
-    end
-
-    local function RefreshFunctionTab()
-        -- Clear existing children
-        for _, child in ipairs({functionContent:GetChildren()}) do
-            child:Hide()
-            child:SetParent(nil)
-        end
-        -- Clear existing regions
-        for _, region in ipairs({functionContent:GetRegions()}) do
-            region:Hide()
-            region:SetParent(nil)
-        end
-
-        local yOffset = 0
-        for i, def in ipairs(FUNCTION_DEFINITIONS) do
-            local row = CreateFrame("Frame", nil, functionContent, "BackdropTemplate")
-            row:SetSize(300, 30)
-            row:SetPoint("TOPLEFT", functionContent, "TOPLEFT", 0, yOffset)
-
-            row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-            row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
-
-            local checkbox = CreateFrame("CheckButton", "TakeMeHomeFuncCheck"..def.key, row, "UICheckButtonTemplate")
-            checkbox:SetPoint("LEFT", row, "LEFT", 5, 0)
-            checkbox:SetChecked(IsFunctionEnabled(def.key))
-            checkbox.key = def.key
-
-            checkbox:SetScript("OnClick", function(self)
-                if not TakeMeHomeDB.functionSettings[self.key] then
-                    TakeMeHomeDB.functionSettings[self.key] = { enabled = true, order = 1 }
-                end
-                TakeMeHomeDB.functionSettings[self.key].enabled = self:GetChecked()
-                UpdateFunctionButtons()
-            end)
-
-            -- Icon
-            local icon = row:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(20, 20)
-            icon:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
-            icon:SetTexture(def.icon)
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            label:SetPoint("LEFT", icon, "RIGHT", 5, 0)
-            label:SetWidth(180)
-            label:SetJustifyH("LEFT")
-            label:SetText(def.name)
-
-            yOffset = yOffset - 32
-        end
-    end
-
-    -- Refresh function tab when shown
-    functionTab:HookScript("OnClick", RefreshFunctionTab)
-
-    -- =====================
-    -- BAR TAB CONTENT
-    -- =====================
-    local function RefreshBarTab()
-        -- Clear existing children and regions
-        for _, child in ipairs({ infoBarContent:GetChildren() }) do
-            child:Hide()
-            child:SetParent(nil)
-        end
-        for _, region in ipairs({ infoBarContent:GetRegions() }) do
-            region:Hide()
-            region:SetParent(nil)
-        end
-
-        if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
-
-        local yOffset = 0
-
-        -- Enable bar row
-        local enableRow = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
-        enableRow:SetSize(340, 30)
-        enableRow:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
-        enableRow:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-        enableRow:SetBackdropColor(0.12, 0.12, 0.15, 0.5)
-
-        local enableCheck = CreateFrame("CheckButton", nil, enableRow, "UICheckButtonTemplate")
-        enableCheck:SetPoint("LEFT", enableRow, "LEFT", 5, 0)
-        enableCheck:SetChecked(TakeMeHomeDB.infoBarSettings.enabled)
-        enableCheck:SetScript("OnClick", function(self)
-            TakeMeHomeDB.infoBarSettings.enabled = self:GetChecked()
-            UpdateInfoBar()
-        end)
-
-        local enableLabel = enableRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        enableLabel:SetPoint("LEFT", enableCheck, "RIGHT", 2, 0)
-        enableLabel:SetText("Enable Info Bar")
-        yOffset = yOffset - 34
-
-        -- Position row
-        local posRow = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
-        posRow:SetSize(340, 30)
-        posRow:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
-        posRow:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-        posRow:SetBackdropColor(0.12, 0.12, 0.15, 0)
-
-        local posLabel = posRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        posLabel:SetPoint("LEFT", posRow, "LEFT", 10, 0)
-        posLabel:SetText("Position:")
-
-        local botBtn = CreateModernButton(posRow, 60, "Bottom")
-        botBtn:SetPoint("LEFT", posLabel, "RIGHT", 10, 0)
-
-        local topBtn = CreateModernButton(posRow, 60, "Top")
-        topBtn:SetPoint("LEFT", botBtn, "RIGHT", 5, 0)
-
-        local function RefreshPosButtons()
-            if TakeMeHomeDB.infoBarSettings.position == "TOP" then
-                topBtn:SetBackdropColor(0.2, 0.5, 0.8, 1)
-                botBtn:SetBackdropColor(0.2, 0.2, 0.25, 1)
-            else
-                botBtn:SetBackdropColor(0.2, 0.5, 0.8, 1)
-                topBtn:SetBackdropColor(0.2, 0.2, 0.25, 1)
-            end
-        end
-        RefreshPosButtons()
-
-        botBtn:SetScript("OnClick", function()
-            TakeMeHomeDB.infoBarSettings.position = "BOTTOM"
-            UpdateInfoBarPosition()
-            RefreshPosButtons()
-        end)
-        topBtn:SetScript("OnClick", function()
-            TakeMeHomeDB.infoBarSettings.position = "TOP"
-            UpdateInfoBarPosition()
-            RefreshPosButtons()
-        end)
-        yOffset = yOffset - 36
-
-        -- ATT button toggle (only shown if ATT is loaded)
-        if C_AddOns.IsAddOnLoaded("AllTheThings") then
-            local attRow = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
-            attRow:SetSize(340, 30)
-            attRow:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
-            attRow:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-            attRow:SetBackdropColor(0.10, 0.06, 0.18, 0.6)
-
-            local attCheck = CreateFrame("CheckButton", nil, attRow, "UICheckButtonTemplate")
-            attCheck:SetPoint("LEFT", attRow, "LEFT", 5, 0)
-            attCheck:SetChecked(TakeMeHomeDB.infoBarSettings.attButton ~= false)
-            attCheck:SetScript("OnClick", function(self)
-                TakeMeHomeDB.infoBarSettings.attButton = self:GetChecked()
-                print("|cff00ff00TakeMeHome|r: Reload UI to apply ATT button change.")
-            end)
-
-            local attRowLabel = attRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            attRowLabel:SetPoint("LEFT", attCheck, "RIGHT", 2, 0)
-            attRowLabel:SetText("|cffcc99ffAll The Things|r expansion menu")
-
-            yOffset = yOffset - 34
-        end
-
-        -- Section header
-        local sepLabel = infoBarContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        sepLabel:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 5, yOffset)
-        sepLabel:SetText("|cff888888Text Modules|r")
-        yOffset = yOffset - 20
-
-        -- Module rows
-        local sectionColors = { left = "|cff88aaff", center = "|cff88ffaa", right = "|cffffaa88" }
-        for i, mod in ipairs(INFO_BAR_MODULES) do
-            local addonLoaded = not mod.addonName or C_AddOns.IsAddOnLoaded(mod.addonName)
-
-            local row = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
-            row:SetSize(340, 26)
-            row:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
-            row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
-            row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
-
-            local settings = TakeMeHomeDB.infoBarSettings.modules[mod.key]
-            local checkbox = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-            checkbox:SetPoint("LEFT", row, "LEFT", 5, 0)
-            checkbox:SetChecked(settings and settings.enabled or false)
-            checkbox.modKey = mod.key
-            if addonLoaded then
-                checkbox:SetScript("OnClick", function(self)
-                    TakeMeHomeDB.infoBarSettings.modules[self.modKey].enabled = self:GetChecked()
-                    UpdateInfoBar()
-                end)
-            else
-                checkbox:SetEnabled(false)
-                checkbox:SetAlpha(0.4)
-            end
-
-            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            label:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
-            label:SetText(mod.name)
-            if not addonLoaded then label:SetTextColor(0.5, 0.5, 0.5) end
-
-            -- Right side: section tag, or "not installed" for addon modules
-            local secLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            secLabel:SetPoint("RIGHT", row, "RIGHT", -5, 0)
-            if mod.addonName and not addonLoaded then
-                secLabel:SetText("|cffff6644not installed|r")
-            elseif mod.addonName then
-                secLabel:SetText("|cff44ff88" .. mod.addonName .. "|r")
-            else
-                secLabel:SetText((sectionColors[mod.section] or "|cff888888") .. mod.section .. "|r")
-            end
-
-            yOffset = yOffset - 28
-        end
-    end
-
-    barTab:HookScript("OnClick", RefreshBarTab)
-
-    -- Initial population of tabs (so they're not empty when first opened)
-    RefreshProfessionsTab()
-    RefreshMountsTab()
-    RefreshFunctionTab()
-    RefreshBarTab()
-
-    -- Instructions
-    local instructions = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    instructions:SetPoint("BOTTOM", configFrame, "BOTTOM", 0, 12)
-    instructions:SetText("|cff888888Check to enable  |  ^ v to reorder|r")
-
-    configFrame:Show()
-end
 
 -- ============================================
 -- PROFESSIONS WINDOW
@@ -4463,15 +3679,30 @@ local function CreateInfoModuleBtn(key, section)
     btn.modKey  = key
     btn.section = section
 
-    if INFO_MODULE_ACTIONS[key] then
+    local hasLeft  = INFO_MODULE_ACTIONS[key] ~= nil
+    local hasRight = INFO_MODULE_RIGHT_ACTIONS and INFO_MODULE_RIGHT_ACTIONS[key] ~= nil
+    if hasLeft or hasRight then
         local hl = btn:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
         hl:SetColorTexture(1, 1, 1, 0.08)
-        btn:SetScript("OnClick", function(self) INFO_MODULE_ACTIONS[self.modKey]() end)
+        if hasLeft and hasRight then
+            btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            btn:SetScript("OnClick", function(self, mouseBtn)
+                if mouseBtn == "RightButton" then
+                    INFO_MODULE_RIGHT_ACTIONS[self.modKey]()
+                else
+                    INFO_MODULE_ACTIONS[self.modKey]()
+                end
+            end)
+        elseif hasLeft then
+            btn:SetScript("OnClick", function(self) INFO_MODULE_ACTIONS[self.modKey]() end)
+        else
+            btn:RegisterForClicks("RightButtonUp")
+            btn:SetScript("OnClick", function(self) INFO_MODULE_RIGHT_ACTIONS[self.modKey]() end)
+        end
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             local rawText = self.lbl:GetText() or ""
-            -- Strip color codes for tooltip title
             GameTooltip:SetText(rawText:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""), 1, 1, 1)
             local tip = INFO_MODULE_TIPS[self.modKey]
             if tip then GameTooltip:AddLine(tip, 0.6, 0.6, 0.6) end
@@ -4565,7 +3796,8 @@ local function GetInfoModuleText(key)
         if mapID then
             local pos = C_Map.GetPlayerMapPosition(mapID, "player")
             if pos then
-                return string.format("|cff888888(|r|cffffffff%.1f, %.1f|r|cff888888)|r", pos.x * 100, pos.y * 100)
+                lastCoordsString = string.format("%.1f, %.1f", pos.x * 100, pos.y * 100)
+                return string.format("|cff888888(|r|cffffffff%s|r|cff888888)|r", lastCoordsString)
             end
         end
         return ""
@@ -4671,16 +3903,6 @@ local function GetInfoModuleText(key)
         end
         return "|cff888888Sesh |r" .. color .. sign .. str .. "|r"
 
-    elseif key == "memory" then
-        UpdateAddOnMemoryUsage()
-        local total = 0
-        for i = 1, C_AddOns.GetNumAddOns() do
-            total = total + GetAddOnMemoryUsage(i)
-        end
-        local mb = total / 1024
-        local color = mb > 300 and "|cffff4444" or mb > 150 and "|cffffff44" or "|cff44ff44"
-        return "|cff888888Mem |r" .. color .. string.format("%.0f", mb) .. "|r|cff888888MB|r"
-
     elseif key == "timeLocal" then
         return string.format("|cff888888Local |r|cffadd8e6%s|r", date("%H:%M"))
 
@@ -4698,6 +3920,28 @@ local function GetInfoModuleText(key)
         if ok and result then return result end
         return ""
 
+    elseif key == "hsCooldown" then
+        local shortest = nil
+        for _, item in ipairs(TRAVEL_ITEMS) do
+            local ok, start, duration = pcall(GetItemCooldown, item.itemID)
+            if ok and start and duration and duration > 0 then
+                local rem = start + duration - GetTime()
+                if rem > 0 and (not shortest or rem < shortest) then
+                    shortest = rem
+                end
+            end
+        end
+        if shortest then
+            local m = math.floor(shortest / 60)
+            local s = math.floor(shortest % 60)
+            if m > 0 then
+                return string.format("|cff888888HS |r|cffff8844%dm %02ds|r", m, s)
+            else
+                return string.format("|cff888888HS |r|cffff8844%ds|r", s)
+            end
+        end
+        return "|cff888888HS |r|cff44ff44Ready|r"
+
     elseif key == "att" then
         return "" -- ATT is now a dedicated bar button; see InitializeInfoBar
     end
@@ -4712,19 +3956,26 @@ UpdateInfoBar = function()
         return
     end
 
-    -- Update each module button
+    -- Update each module button; track whether any text changed
+    local needReflow = false
     for _, btn in ipairs(infoBarModuleBtns) do
         local s = TakeMeHomeDB.infoBarSettings.modules[btn.modKey]
         if s and s.enabled then
             local text = GetInfoModuleText(btn.modKey)
             if text and text ~= "" then
-                btn.lbl:SetText(text)
-                btn:Show()
+                if text ~= btn._lastText then
+                    btn.lbl:SetText(text)
+                    btn._lastText = text
+                    needReflow = true
+                end
+                if not btn:IsShown() then btn:Show(); needReflow = true end
             else
-                btn:Hide()
+                if btn:IsShown() then btn:Hide(); needReflow = true end
+                btn._lastText = nil
             end
         else
-            btn:Hide()
+            if btn:IsShown() then btn:Hide(); needReflow = true end
+            btn._lastText = nil
         end
     end
 
@@ -4743,7 +3994,9 @@ UpdateInfoBar = function()
         infoBar:Show()
     end
 
-    ReflowInfoBar()
+    if needReflow then
+        ReflowInfoBar()
+    end
 end
 
 UpdateInfoBarPosition = function()
@@ -4852,7 +4105,10 @@ InitializeInfoBar = function()
     end
 
     local attAnchor = lastBtn  -- track anchor for left-text offset
-    if C_AddOns.IsAddOnLoaded("AllTheThings")
+    local attIsPresent = attSlashHandler ~= nil
+                      or C_AddOns.IsAddOnLoaded("AllTheThings")
+                      or (AllTheThings ~= nil)
+    if attIsPresent
     and TakeMeHomeDB.infoBarSettings
     and TakeMeHomeDB.infoBarSettings.attButton ~= false then
 
@@ -4942,10 +4198,10 @@ InitializeInfoBar = function()
             end)
         end)
 
-        -- ATT bar button — anchored to the right edge of the Coords text
+        -- ATT bar button — anchored after the last window-toggle button
         local attBarBtn = CreateFrame("Button", nil, infoBar)
         attBarBtn:SetSize(30, btnSize)
-        attBarBtn:SetPoint("LEFT", infoBarLeft, "RIGHT", 8, 0)
+        attBarBtn:SetPoint("LEFT", lastBtn, "RIGHT", 8, 0)
 
         local attBtnTex = attBarBtn:CreateTexture(nil, "BACKGROUND")
         attBtnTex:SetAllPoints()

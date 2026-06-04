@@ -1,5 +1,19 @@
 # TakeMeHome Changelog
 
+## [1.9.0] - 2026-06-04
+### Added
+- **HS Cooldown** info bar module — shows hearthstone cooldown countdown or "Ready" (green); click to toggle Travel window
+- **Coordinates right-click** — right-clicking the Coords module drops a TomTom waypoint at your position (falls back to pre-filling chat if TomTom is not loaded)
+- Right-click support infrastructure for all info bar modules (`INFO_MODULE_RIGHT_ACTIONS`)
+
+### Fixed
+- Config panel sidebar showing only "General" (nav counter used `#table` on a hash table, always returned 0)
+- Unnamed slider (`GetName()` returned nil) crashing config panel on open
+- Old tab-based config panel code (816 lines) was floating as module-level code with a stray `end`, preventing the addon from loading at all
+- `ReflowInfoBar` called every second causing UI stutter — now only runs when text changes
+- Removed Memory module (caused periodic GC lag spikes)
+- ATT bar button anchor referenced undefined `infoBarLeft` variable — fixed to use `lastBtn`
+
 ## [1.8.0] - 2026-06-03
 ### Added
 - **Info Bar**: Persistent full-width bar (docked top or bottom of screen) showing live game data
