@@ -1,5 +1,13 @@
 # TakeMeHome Changelog
 
+## [2.0.0] - 2026-06-04
+### Added
+- **Dual bar** — independent top and bottom bars, each with their own enable toggle
+- Each module has a Bot/Top toggle in settings to assign it to either bar (reload to apply)
+- Top bar has its own cog button to open settings
+- **Spec module** — shows current specialization on bar; left-click opens Talents; right-click opens spec-switch dropdown with icons
+- Window toggles and ATT button remain on the bottom bar
+
 ## [1.9.0] - 2026-06-04
 ### Added
 - **HS Cooldown** info bar module — shows hearthstone cooldown countdown or "Ready" (green); click to toggle Travel window

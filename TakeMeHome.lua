@@ -64,6 +64,7 @@ local INFO_BAR_MODULES = {
     { key = "sessionGold", name = "Session Gold", section = "center", order = 9  },
 
     { key = "hsCooldown",  name = "HS Cooldown",  section = "left",   order = 10 },
+    { key = "spec",        name = "Specialization", section = "left", order = 16 },
     { key = "fps",         name = "FPS",          section = "right",  order = 11 },
     { key = "latency",     name = "Latency",      section = "right",  order = 12 },
     { key = "timeLocal",   name = "Local Time",   section = "right",  order = 13 },
@@ -168,27 +169,27 @@ local defaults = {
     hiddenWindows = {},
     -- Info bar
     infoBarSettings = {
-        enabled = true,
-        position = "BOTTOM", -- "TOP" or "BOTTOM"
-        yOffset = 0,
-        attButton = true,  -- show ATT expansion dropdown button on bar
+        enabled    = true,   -- bottom bar
+        topEnabled = false,  -- top bar
+        yOffset    = 0,
+        attButton  = true,
         modules = {
-            zone =        { enabled = true,  order = 1  },
-            coords =      { enabled = true,  order = 2  },
-            ilvl =        { enabled = true,  order = 3  },
-            rep =         { enabled = false, order = 4  },
-            gold =        { enabled = true,  order = 5  },
-            bags =        { enabled = true,  order = 6  },
-            durability =  { enabled = true,  order = 7  },
-            xp =          { enabled = false, order = 8  },
-            sessionGold = { enabled = true,  order = 9  },
-
-            hsCooldown =  { enabled = true,  order = 10 },
-            fps =         { enabled = true,  order = 11 },
-            latency =     { enabled = true,  order = 12 },
-            timeLocal =   { enabled = true,  order = 13 },
-            time =        { enabled = true,  order = 14 },
-            friends =     { enabled = false, order = 15 },
+            zone =        { enabled = true,  order = 1,  bar = "bottom" },
+            coords =      { enabled = true,  order = 2,  bar = "bottom" },
+            ilvl =        { enabled = true,  order = 3,  bar = "bottom" },
+            rep =         { enabled = false, order = 4,  bar = "bottom" },
+            gold =        { enabled = true,  order = 5,  bar = "bottom" },
+            bags =        { enabled = true,  order = 6,  bar = "bottom" },
+            durability =  { enabled = true,  order = 7,  bar = "bottom" },
+            xp =          { enabled = false, order = 8,  bar = "bottom" },
+            sessionGold = { enabled = true,  order = 9,  bar = "bottom" },
+            hsCooldown =  { enabled = true,  order = 10, bar = "bottom" },
+            spec =        { enabled = true,  order = 16, bar = "bottom" },
+            fps =         { enabled = true,  order = 11, bar = "bottom" },
+            latency =     { enabled = true,  order = 12, bar = "bottom" },
+            timeLocal =   { enabled = true,  order = 13, bar = "bottom" },
+            time =        { enabled = true,  order = 14, bar = "bottom" },
+            friends =     { enabled = false, order = 15, bar = "bottom" },
         }
     },
 }
@@ -248,6 +249,15 @@ local INFO_MODULE_ACTIONS = {
     rep         = function() pcall(function() ToggleCharacter("ReputationFrame") end) end,
     sessionGold = function() pcall(OpenAllBags) end,
     hsCooldown  = function() if mainFrame:IsShown() then mainFrame:Hide() else mainFrame:Show() end end,
+    spec        = function()
+        pcall(function()
+            if PlayerSpellsFrame and PlayerSpellsFrame:IsShown() then
+                HideUIPanel(PlayerSpellsFrame)
+            else
+                ShowUIPanel(PlayerSpellsFrame)
+            end
+        end)
+    end,
 }
 
 -- Right-click actions for modules that support it
@@ -287,6 +297,7 @@ local INFO_MODULE_TIPS = {
     rep         = "Click to open Reputations",
     sessionGold = "Click to open Bags",
     hsCooldown  = "Click to toggle Travel window",
+    spec        = "Click to open Talents  |cff888888Right-click to switch spec|r",
 }
 
 -- ============================================
@@ -1772,6 +1783,13 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             if not TakeMeHomeDB.infoBarSettings.modules[key] then
                 TakeMeHomeDB.infoBarSettings.modules[key] = CopyTable(defaultModule)
             end
+            -- Ensure bar field exists (migration from single-bar versions)
+            if TakeMeHomeDB.infoBarSettings.modules[key].bar == nil then
+                TakeMeHomeDB.infoBarSettings.modules[key].bar = "bottom"
+            end
+        end
+        if TakeMeHomeDB.infoBarSettings.topEnabled == nil then
+            TakeMeHomeDB.infoBarSettings.topEnabled = false
         end
         -- Remove legacy att text module if it exists
         TakeMeHomeDB.infoBarSettings.modules["att"] = nil
@@ -2154,47 +2172,22 @@ local function CreateConfigPanel()
         hdr:SetText("|cff4da6ffInfo Bar|r")
         y = y - 30
 
-        -- Enable bar
-        MakeCheckRow(barSec, y, "Enable Info Bar",
+        -- Enable bottom bar
+        MakeCheckRow(barSec, y, "Enable Bottom Bar",
             TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.enabled or true,
             function(v) if TakeMeHomeDB.infoBarSettings then TakeMeHomeDB.infoBarSettings.enabled = v; UpdateInfoBar() end end)
         y = y - 32
 
-        -- Position buttons
-        local posLabel = barSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        posLabel:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, y)
-        posLabel:SetText("Bar Position:")
-        y = y - 26
-
-        local function MakePosBtn(parent, yy, label, posVal)
-            local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-            btn:SetSize(80, 24)
-            btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 4 + (posVal == "TOP" and 88 or 0), yy)
-            btn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
-            local isActive = TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.position == posVal
-            btn:SetBackdropColor(isActive and 0.2 or 0.12, isActive and 0.5 or 0.12, isActive and 0.8 or 0.15, 1)
-            btn:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
-            local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            lbl:SetPoint("CENTER")
-            lbl:SetText(label)
-            btn:SetScript("OnClick", function()
-                if TakeMeHomeDB.infoBarSettings then
-                    TakeMeHomeDB.infoBarSettings.position = posVal
-                    UpdateInfoBarPosition()
-                    -- Refresh section
-                    ShowSection("bar")
-                end
-            end)
-            return btn
-        end
-        MakePosBtn(barSec, y, "Bottom", "BOTTOM")
-        MakePosBtn(barSec, y, "Top",    "TOP")
-        y = y - 34
+        -- Enable top bar
+        MakeCheckRow(barSec, y, "Enable Top Bar",
+            TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.topEnabled or false,
+            function(v) if TakeMeHomeDB.infoBarSettings then TakeMeHomeDB.infoBarSettings.topEnabled = v; UpdateInfoBar() end end)
+        y = y - 36
 
         -- ATT button toggle (if ATT loaded)
         if C_AddOns.IsAddOnLoaded("AllTheThings") then
-            local attRow, attCB = MakeCheckRow(barSec, y,
-                "|cffcc99ffAll The Things|r expansion menu",
+            MakeCheckRow(barSec, y,
+                "|cffcc99ffAll The Things|r expansion menu (bottom bar)",
                 TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.attButton ~= false or true,
                 function(v)
                     TakeMeHomeDB.infoBarSettings.attButton = v
@@ -2206,12 +2199,11 @@ local function CreateConfigPanel()
         -- Modules header
         local modHdr = barSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         modHdr:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, y)
-        modHdr:SetText("|cff888888Text Modules|r")
+        modHdr:SetText("|cff888888Modules — check to enable, click Bot/Top to move bar|r")
         y = y - 22
 
         local secColors = { left="|cff88aaff", center="|cff88ffaa", right="|cffffaa88" }
         for i, mod in ipairs(INFO_BAR_MODULES) do
-            local addonLoaded = not mod.addonName or C_AddOns.IsAddOnLoaded(mod.addonName)
             local settings = TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.modules[mod.key]
             local row = CreateFrame("Frame", nil, barSec, "BackdropTemplate")
             row:SetSize(480, 26)
@@ -2219,32 +2211,55 @@ local function CreateConfigPanel()
             row:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
             row:SetBackdropColor(0.10, 0.10, 0.13, i%2==0 and 0.5 or 0)
 
+            -- Enable checkbox
             local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
             cb:SetPoint("LEFT", row, "LEFT", 4, 0)
             cb:SetChecked(settings and settings.enabled or false)
             cb.modKey = mod.key
-            if addonLoaded then
-                cb:SetScript("OnClick", function(self)
-                    if TakeMeHomeDB.infoBarSettings.modules[self.modKey] then
-                        TakeMeHomeDB.infoBarSettings.modules[self.modKey].enabled = self:GetChecked()
-                        UpdateInfoBar()
-                    end
-                end)
-            else
-                cb:SetEnabled(false); cb:SetAlpha(0.4)
-            end
+            cb:SetScript("OnClick", function(self)
+                if TakeMeHomeDB.infoBarSettings.modules[self.modKey] then
+                    TakeMeHomeDB.infoBarSettings.modules[self.modKey].enabled = self:GetChecked()
+                    UpdateInfoBar()
+                end
+            end)
 
+            -- Module name
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
             lbl:SetText(mod.name)
-            if not addonLoaded then lbl:SetTextColor(0.5,0.5,0.5) end
 
+            -- Section label (left/center/right)
             local secLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            secLbl:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-            local hasClick = INFO_MODULE_ACTIONS[mod.key] ~= nil
+            secLbl:SetPoint("RIGHT", row, "RIGHT", -80, 0)
             local secText = (secColors[mod.section] or "|cff888888") .. mod.section .. "|r"
-            if hasClick then secText = secText .. " |cff44ff88⊕|r" end
+            if INFO_MODULE_ACTIONS[mod.key] then secText = secText .. " |cff44ff88⊕|r" end
             secLbl:SetText(secText)
+
+            -- Bot / Top toggle button
+            local curBar = (settings and settings.bar) or "bottom"
+            local barToggle = CreateFrame("Button", nil, row, "BackdropTemplate")
+            barToggle:SetSize(56, 18)
+            barToggle:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+            barToggle:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
+            barToggle.modKey = mod.key
+            local function RefreshBarToggle(self)
+                local b = (TakeMeHomeDB.infoBarSettings.modules[self.modKey] or {}).bar or "bottom"
+                self:SetBackdropColor(b == "top" and 0.1 or 0.15, b == "top" and 0.35 or 0.15, b == "top" and 0.7 or 0.25, 1)
+                self:SetBackdropBorderColor(0.3, 0.3, 0.4, 1)
+                self.lbl:SetText(b == "top" and "|cffaaddffTop|r" or "|cff88cc88Bot|r")
+            end
+            local btLbl = barToggle:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            btLbl:SetPoint("CENTER")
+            barToggle.lbl = btLbl
+            RefreshBarToggle(barToggle)
+            barToggle:SetScript("OnClick", function(self)
+                local s = TakeMeHomeDB.infoBarSettings.modules[self.modKey]
+                if s then
+                    s.bar = (s.bar == "top") and "bottom" or "top"
+                    RefreshBarToggle(self)
+                    print("|cff00ff00TakeMeHome|r: Reload UI to apply bar change.")
+                end
+            end)
 
             y = y - 27
         end
@@ -3656,16 +3671,33 @@ infoBar:SetBackdrop({
 infoBar:SetBackdropColor(0.05, 0.05, 0.08, 0.88)
 infoBar:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.8)
 
--- Individual module button registry (populated in InitializeInfoBar)
-local infoBarModuleBtns  = {}
-local infoBarLeftOffset  = 8   -- updated in InitializeInfoBar after toggle+ATT buttons
+local infoBarTop = CreateFrame("Frame", "TakeMeHomeInfoBarTop", UIParent, "BackdropTemplate")
+infoBarTop:SetHeight(22)
+infoBarTop:SetPoint("TOPLEFT",  UIParent, "TOPLEFT",  0, 0)
+infoBarTop:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, 0)
+infoBarTop:SetFrameStrata("MEDIUM")
+infoBarTop:SetFrameLevel(1)
+infoBarTop:Hide()
+infoBarTop:SetBackdrop({
+    bgFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeSize = 1,
+    insets = { left = 0, right = 0, top = 0, bottom = 1 }
+})
+infoBarTop:SetBackdropColor(0.05, 0.05, 0.08, 0.88)
+infoBarTop:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.8)
+
+-- Individual module button registries (populated in InitializeInfoBar)
+local infoBarModuleBtns  = {}   -- bottom bar
+local infoBarTopBtns     = {}   -- top bar
+local infoBarLeftOffset  = 8    -- updated after toggle+ATT buttons on bottom bar
 local infoBarCogButton   = nil
 
 local INFO_SEP = " |cff2a2a40||r "
 
 -- Creates one clickable Button for an info bar module
-local function CreateInfoModuleBtn(key, section)
-    local btn = CreateFrame("Button", nil, infoBar)
+local function CreateInfoModuleBtn(key, section, barFrame)
+    local btn = CreateFrame("Button", nil, barFrame or infoBar)
     btn:SetHeight(20)
     btn:SetWidth(10)
 
@@ -3689,16 +3721,16 @@ local function CreateInfoModuleBtn(key, section)
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             btn:SetScript("OnClick", function(self, mouseBtn)
                 if mouseBtn == "RightButton" then
-                    INFO_MODULE_RIGHT_ACTIONS[self.modKey]()
+                    INFO_MODULE_RIGHT_ACTIONS[self.modKey](self)
                 else
-                    INFO_MODULE_ACTIONS[self.modKey]()
+                    INFO_MODULE_ACTIONS[self.modKey](self)
                 end
             end)
         elseif hasLeft then
-            btn:SetScript("OnClick", function(self) INFO_MODULE_ACTIONS[self.modKey]() end)
+            btn:SetScript("OnClick", function(self) INFO_MODULE_ACTIONS[self.modKey](self) end)
         else
             btn:RegisterForClicks("RightButtonUp")
-            btn:SetScript("OnClick", function(self) INFO_MODULE_RIGHT_ACTIONS[self.modKey]() end)
+            btn:SetScript("OnClick", function(self) INFO_MODULE_RIGHT_ACTIONS[self.modKey](self) end)
         end
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -3714,16 +3746,16 @@ local function CreateInfoModuleBtn(key, section)
     return btn
 end
 
--- Reflows all module button positions after text updates
-local function ReflowInfoBar()
-    if not infoBar:IsShown() then return end
-    local barW = infoBar:GetWidth()
+-- Reflows module button positions for a single bar
+local function ReflowBar(barFrame, btns, leftOffset, cogOffset)
+    if not barFrame:IsShown() then return end
+    local barW = barFrame:GetWidth()
     if not barW or barW < 10 then return end
 
     local pad = 6
     local left, center, right = {}, {}, {}
 
-    for _, btn in ipairs(infoBarModuleBtns) do
+    for _, btn in ipairs(btns) do
         if btn:IsShown() then
             local tw = btn.lbl:GetStringWidth()
             if tw and tw > 0 then btn:SetWidth(tw + 2) end
@@ -3733,24 +3765,21 @@ local function ReflowInfoBar()
         end
     end
 
-    -- Left
-    local lx = infoBarLeftOffset
+    local lx = leftOffset or 8
     for _, btn in ipairs(left) do
         btn:ClearAllPoints()
-        btn:SetPoint("LEFT", infoBar, "LEFT", lx, 0)
+        btn:SetPoint("LEFT", barFrame, "LEFT", lx, 0)
         lx = lx + btn:GetWidth() + pad
     end
 
-    -- Right (leaves room for cog: 22px + 6px gap)
-    local rx = 28
+    local rx = cogOffset or 28
     for i = #right, 1, -1 do
         local btn = right[i]
         btn:ClearAllPoints()
-        btn:SetPoint("RIGHT", infoBar, "RIGHT", -rx, 0)
+        btn:SetPoint("RIGHT", barFrame, "RIGHT", -rx, 0)
         rx = rx + btn:GetWidth() + pad
     end
 
-    -- Center
     if #center > 0 then
         local tw = 0
         for i, btn in ipairs(center) do
@@ -3759,10 +3788,15 @@ local function ReflowInfoBar()
         local cx = math.floor((barW - tw) / 2)
         for _, btn in ipairs(center) do
             btn:ClearAllPoints()
-            btn:SetPoint("LEFT", infoBar, "LEFT", cx, 0)
+            btn:SetPoint("LEFT", barFrame, "LEFT", cx, 0)
             cx = cx + btn:GetWidth() + pad
         end
     end
+end
+
+local function ReflowInfoBar()
+    ReflowBar(infoBar,    infoBarModuleBtns, infoBarLeftOffset, 28)
+    ReflowBar(infoBarTop, infoBarTopBtns,    8,                 28)
 end
 
 local function FormatGold(money)
@@ -3920,6 +3954,13 @@ local function GetInfoModuleText(key)
         if ok and result then return result end
         return ""
 
+    elseif key == "spec" then
+        local specIndex = GetSpecialization()
+        if not specIndex then return "" end
+        local _, specName = GetSpecializationInfo(specIndex)
+        if not specName then return "" end
+        return "|cff888888Spec |r|cffffffff" .. specName .. "|r"
+
     elseif key == "hsCooldown" then
         local shortest = nil
         for _, item in ipairs(TRAVEL_ITEMS) do
@@ -3949,16 +3990,8 @@ local function GetInfoModuleText(key)
 end
 
 
-UpdateInfoBar = function()
-    if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
-    if not TakeMeHomeDB.infoBarSettings.enabled then
-        infoBar:Hide()
-        return
-    end
-
-    -- Update each module button; track whether any text changed
-    local needReflow = false
-    for _, btn in ipairs(infoBarModuleBtns) do
+local function UpdateBarBtns(btns, needReflowRef)
+    for _, btn in ipairs(btns) do
         local s = TakeMeHomeDB.infoBarSettings.modules[btn.modKey]
         if s and s.enabled then
             local text = GetInfoModuleText(btn.modKey)
@@ -3966,51 +3999,148 @@ UpdateInfoBar = function()
                 if text ~= btn._lastText then
                     btn.lbl:SetText(text)
                     btn._lastText = text
-                    needReflow = true
+                    needReflowRef[1] = true
                 end
-                if not btn:IsShown() then btn:Show(); needReflow = true end
+                if not btn:IsShown() then btn:Show(); needReflowRef[1] = true end
             else
-                if btn:IsShown() then btn:Hide(); needReflow = true end
+                if btn:IsShown() then btn:Hide(); needReflowRef[1] = true end
                 btn._lastText = nil
             end
         else
-            if btn:IsShown() then btn:Hide(); needReflow = true end
+            if btn:IsShown() then btn:Hide(); needReflowRef[1] = true end
             btn._lastText = nil
         end
     end
+end
 
-    -- Dim window toggle buttons whose windows are hidden
-    for _, btn in ipairs(infoBarToggleButtons) do
-        if btn.dimOverlay then
-            if btn.targetFrame and btn.targetFrame:IsShown() then
-                btn.dimOverlay:Hide()
-            else
-                btn.dimOverlay:Show()
+UpdateInfoBar = function()
+    if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
+
+    local needReflow = {false}
+    local cfg = TakeMeHomeDB.infoBarSettings
+
+    -- Bottom bar
+    if cfg.enabled then
+        UpdateBarBtns(infoBarModuleBtns, needReflow)
+        for _, btn in ipairs(infoBarToggleButtons) do
+            if btn.dimOverlay then
+                btn.dimOverlay:SetShown(not (btn.targetFrame and btn.targetFrame:IsShown()))
             end
         end
+        if userWantsWindowsVisible then infoBar:Show() end
+    else
+        infoBar:Hide()
     end
 
-    if userWantsWindowsVisible then
-        infoBar:Show()
+    -- Top bar
+    if cfg.topEnabled then
+        UpdateBarBtns(infoBarTopBtns, needReflow)
+        if userWantsWindowsVisible then infoBarTop:Show() end
+    else
+        infoBarTop:Hide()
     end
 
-    if needReflow then
-        ReflowInfoBar()
-    end
+    if needReflow[1] then ReflowInfoBar() end
 end
 
 UpdateInfoBarPosition = function()
     if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
-    local pos = TakeMeHomeDB.infoBarSettings.position or "BOTTOM"
     local yOff = TakeMeHomeDB.infoBarSettings.yOffset or 0
     infoBar:ClearAllPoints()
-    if pos == "TOP" then
-        infoBar:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -yOff)
-        infoBar:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, -yOff)
-    else
-        infoBar:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, yOff)
-        infoBar:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0, yOff)
+    infoBar:SetPoint("BOTTOMLEFT",  UIParent, "BOTTOMLEFT",  0,  yOff)
+    infoBar:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0,  yOff)
+    infoBarTop:ClearAllPoints()
+    infoBarTop:SetPoint("TOPLEFT",  UIParent, "TOPLEFT",  0, -yOff)
+    infoBarTop:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, -yOff)
+end
+
+-- Spec switcher dropdown (lazy-created on first right-click)
+local specSwitcherDD = nil
+
+INFO_MODULE_RIGHT_ACTIONS.spec = function(anchorBtn)
+    -- Lazy-create the dropdown
+    if not specSwitcherDD then
+        local numSpecs = GetNumSpecializations()
+        if not numSpecs or numSpecs == 0 then return end
+        local rowH, ddW = 26, 175
+        specSwitcherDD = CreateFrame("Frame", "TakeMeHomeSpecDD", UIParent, "BackdropTemplate")
+        specSwitcherDD:SetSize(ddW, numSpecs * rowH + 8)
+        specSwitcherDD:SetFrameStrata("TOOLTIP")
+        specSwitcherDD:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+        specSwitcherDD:SetBackdropColor(0.07, 0.07, 0.10, 0.97)
+        specSwitcherDD:SetBackdropBorderColor(0.4, 0.4, 0.5, 1)
+        specSwitcherDD:EnableMouse(true)
+        specSwitcherDD:Hide()
+        specSwitcherDD.rows = {}
+
+        for i = 1, numSpecs do
+            local _, sName, _, sIcon = GetSpecializationInfo(i)
+            local row = CreateFrame("Button", nil, specSwitcherDD)
+            row:SetSize(ddW - 2, rowH)
+            row:SetPoint("TOPLEFT", specSwitcherDD, "TOPLEFT", 1, -(4 + (i-1)*rowH))
+            row.bg = row:CreateTexture(nil, "BACKGROUND")
+            row.bg:SetAllPoints()
+            row.bg:SetColorTexture(0, 0, 0, 0)
+            local hl = row:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(0.3, 0.3, 0.5, 0.3)
+            local ic = row:CreateTexture(nil, "ARTWORK")
+            ic:SetSize(18, 18)
+            ic:SetPoint("LEFT", row, "LEFT", 6, 0)
+            ic:SetTexture(sIcon)
+            ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lbl:SetPoint("LEFT", ic, "RIGHT", 5, 0)
+            lbl:SetText(sName)
+            row.specIndex = i
+            row:SetScript("OnClick", function(self)
+                if InCombatLockdown() then
+                    print("|cff00ff00TakeMeHome|r: Cannot switch specs in combat.")
+                    return
+                end
+                local switched = false
+                if SetSpecialization then
+                    pcall(SetSpecialization, self.specIndex)
+                    switched = true
+                elseif C_SpecializationInfo and C_SpecializationInfo.SetSpecialization then
+                    pcall(C_SpecializationInfo.SetSpecialization, self.specIndex)
+                    switched = true
+                end
+                if not switched then
+                    pcall(function() ShowUIPanel(PlayerSpellsFrame) end)
+                    print("|cff00ff00TakeMeHome|r: Direct spec switch unavailable — select spec in the Talents frame.")
+                end
+                specSwitcherDD:Hide()
+            end)
+            table.insert(specSwitcherDD.rows, row)
+        end
+
+        specSwitcherDD:SetScript("OnShow", function(self)
+            local cur = GetSpecialization()
+            for _, r in ipairs(self.rows) do
+                r.bg:SetColorTexture(r.specIndex == cur and 0.1 or 0,
+                                     r.specIndex == cur and 0.25 or 0,
+                                     r.specIndex == cur and 0.5 or 0,
+                                     r.specIndex == cur and 0.4 or 0)
+            end
+        end)
+        specSwitcherDD:SetScript("OnLeave", function(self)
+            C_Timer.After(0.15, function() if not self:IsMouseOver() then self:Hide() end end)
+        end)
     end
+
+    if specSwitcherDD:IsShown() then
+        specSwitcherDD:Hide()
+        return
+    end
+    specSwitcherDD:ClearAllPoints()
+    local pos = TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.position or "BOTTOM"
+    if pos == "TOP" then
+        specSwitcherDD:SetPoint("TOPLEFT", anchorBtn, "BOTTOMLEFT", 0, -2)
+    else
+        specSwitcherDD:SetPoint("BOTTOMLEFT", anchorBtn, "TOPLEFT", 0, 2)
+    end
+    specSwitcherDD:Show()
 end
 
 InitializeInfoBar = function()
@@ -4266,22 +4396,47 @@ InitializeInfoBar = function()
     end)
     infoBarCogButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Create individual module buttons for each INFO_BAR_MODULE
+    -- Create individual module buttons, routed to correct bar by saved setting
     wipe(infoBarModuleBtns)
-    -- Sort by order
+    wipe(infoBarTopBtns)
     local sortedMods = {}
     for _, mod in ipairs(INFO_BAR_MODULES) do table.insert(sortedMods, mod) end
     table.sort(sortedMods, function(a, b) return a.order < b.order end)
     for _, mod in ipairs(sortedMods) do
-        local btn = CreateInfoModuleBtn(mod.key, mod.section)
-        table.insert(infoBarModuleBtns, btn)
+        local modBar = (TakeMeHomeDB.infoBarSettings.modules[mod.key] or {}).bar or "bottom"
+        local barFrame = modBar == "top" and infoBarTop or infoBar
+        local btn = CreateInfoModuleBtn(mod.key, mod.section, barFrame)
+        if modBar == "top" then
+            table.insert(infoBarTopBtns, btn)
+        else
+            table.insert(infoBarModuleBtns, btn)
+        end
     end
 
-    -- Left text starts after toggle buttons (+ ATT button gap if present)
+    -- Bottom bar left offset: after toggle buttons + ATT button
     infoBarLeftOffset = #TOGGLE_DEFS * (btnSize + btnGap) - btnGap + 12
     if attAnchor and attAnchor ~= lastBtn then
         infoBarLeftOffset = infoBarLeftOffset + btnGap * 3 + 30 + 4
     end
+
+    -- Top bar cog button
+    local topCog = CreateFrame("Button", nil, infoBarTop)
+    topCog:SetSize(20, 20)
+    topCog:SetPoint("RIGHT", infoBarTop, "RIGHT", -4, 0)
+    local topCogIcon = topCog:CreateTexture(nil, "ARTWORK")
+    topCogIcon:SetAllPoints()
+    topCogIcon:SetTexture("Interface\\Icons\\Trade_Engineering")
+    topCogIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local topCogHL = topCog:CreateTexture(nil, "HIGHLIGHT")
+    topCogHL:SetAllPoints()
+    topCogHL:SetColorTexture(1, 1, 1, 0.25)
+    topCog:SetScript("OnClick", function() CreateConfigPanel() end)
+    topCog:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("TakeMeHome Settings", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    topCog:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     UpdateInfoBar()
 end
