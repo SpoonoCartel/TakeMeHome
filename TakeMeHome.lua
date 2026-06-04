@@ -1,6 +1,12 @@
 -- TakeMeHome - Quick access to Hearthstones and travel options
 local addonName, addon = ...
 
+-- Public external data table. Any addon or WeakAura can write values here and
+-- TakeMeHome will display them in the info bar.
+-- Example (from another addon or WeakAura):
+--   TakeMeHomeExternalData["att"] = "63.8%"
+TakeMeHomeExternalData = TakeMeHomeExternalData or {}
+
 -- Item IDs for travel items (isToy = true for toys, false/nil for bag items)
 local TRAVEL_ITEMS = {
     { itemID = 6948,   name = "Hearthstone", isToy = false, settingsKey = "hearthstone" },
@@ -43,6 +49,43 @@ local ALTERNATIVE_HEARTHSTONE_TOYS = {
 local MAILBOX_TOYS = {
     { itemID = 40768,  name = "MOLL-E" },
     { itemID = 156833, name = "Katy's Stampwhistle" },
+}
+
+-- Info bar module definitions (section: "left" | "center" | "right")
+local INFO_BAR_MODULES = {
+    { key = "zone",        name = "Zone",         section = "left",   order = 1  },
+    { key = "coords",      name = "Coords",       section = "left",   order = 2  },
+    { key = "ilvl",        name = "Item Level",   section = "left",   order = 3  },
+    { key = "rep",         name = "Reputation",   section = "left",   order = 4  },
+    { key = "gold",        name = "Gold",         section = "center", order = 5  },
+    { key = "bags",        name = "Bags",         section = "center", order = 6  },
+    { key = "durability",  name = "Durability",   section = "center", order = 7  },
+    { key = "xp",          name = "XP",           section = "center", order = 8  },
+    { key = "sessionGold", name = "Session Gold", section = "center", order = 9  },
+    { key = "memory",      name = "Memory",       section = "right",  order = 10 },
+    { key = "fps",         name = "FPS",          section = "right",  order = 11 },
+    { key = "latency",     name = "Latency",      section = "right",  order = 12 },
+    { key = "timeLocal",   name = "Local Time",   section = "right",  order = 13 },
+    { key = "time",        name = "Server Time",  section = "right",  order = 14 },
+    { key = "friends",     name = "Friends",      section = "right",  order = 15 },
+}
+
+-- All The Things dropdown entries with their slash command arguments
+local ATT_EXPANSIONS = {
+    { name = "Main",                    cmd = "main",       separator = false },
+    { name = "Mini",                    cmd = "mini",       separator = true  }, -- separator drawn after this entry
+    { name = "Classic",                 cmd = "awp classic" },
+    { name = "The Burning Crusade",     cmd = "awp tbc"     },
+    { name = "Wrath of the Lich King",  cmd = "awp wotlk"   },
+    { name = "Cataclysm",               cmd = "awp cata"    },
+    { name = "Mists of Pandaria",       cmd = "awp mop"     },
+    { name = "Warlords of Draenor",     cmd = "awp wod"     },
+    { name = "Legion",                  cmd = "awp legion"  },
+    { name = "Battle for Azeroth",      cmd = "awp bfa"     },
+    { name = "Shadowlands",             cmd = "awp sl"      },
+    { name = "Dragonflight",            cmd = "awp df"      },
+    { name = "The War Within",          cmd = "awp tww"     },
+    { name = "Midnight",                cmd = "awp mid"     },
 }
 
 -- Warband Bank Spell
@@ -120,6 +163,32 @@ local defaults = {
     -- Window snapping and linking
     snapEnabled = true,
     linkedWindows = {}, -- Groups of linked window keys, e.g., { {"main", "professions"}, {"mounts", "function"} }
+    -- Per-window visibility overrides set by bar toggle buttons (persisted across sessions)
+    hiddenWindows = {},
+    -- Info bar
+    infoBarSettings = {
+        enabled = true,
+        position = "BOTTOM", -- "TOP" or "BOTTOM"
+        yOffset = 0,
+        attButton = true,  -- show ATT expansion dropdown button on bar
+        modules = {
+            zone =        { enabled = true,  order = 1  },
+            coords =      { enabled = true,  order = 2  },
+            ilvl =        { enabled = true,  order = 3  },
+            rep =         { enabled = false, order = 4  },
+            gold =        { enabled = true,  order = 5  },
+            bags =        { enabled = true,  order = 6  },
+            durability =  { enabled = true,  order = 7  },
+            xp =          { enabled = false, order = 8  },
+            sessionGold = { enabled = true,  order = 9  },
+            memory =      { enabled = false, order = 10 },
+            fps =         { enabled = true,  order = 11 },
+            latency =     { enabled = true,  order = 12 },
+            timeLocal =   { enabled = true,  order = 13 },
+            time =        { enabled = true,  order = 14 },
+            friends =     { enabled = false, order = 15 },
+        }
+    },
 }
 
 -- Main frame
@@ -149,9 +218,45 @@ mainFrame:SetScale(0.75)
 local UpdateMainDragBanner, UpdateProfDragBanner, UpdateMountsDragBanner, UpdateFuncDragBanner, UpdateMissionDragBanner
 local InitializeProfessions, InitializeMounts, InitializeFunction, InitializeMissions
 local UpdateProfessionButtons, UpdateMountButtons, UpdateFunctionButtons, UpdateMissionButtons
+local UpdateInfoBar, UpdateInfoBarPosition, InitializeInfoBar
 
 -- Track if user wants windows visible (used by minimap toggle)
 local userWantsWindowsVisible = true
+
+-- Per-window hide flags set by the info bar toggle buttons
+local windowHiddenByBar = {}
+
+-- Session gold baseline (set at PLAYER_LOGIN)
+local sessionGoldStart = nil
+
+-- Click actions and tooltips for info bar modules
+local INFO_MODULE_ACTIONS = {
+    zone       = function() pcall(ToggleWorldMap) end,
+    coords     = function() pcall(ToggleWorldMap) end,
+    gold       = function() pcall(OpenAllBags) end,
+    bags       = function() pcall(OpenAllBags) end,
+    durability = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
+    ilvl       = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
+    time       = function() pcall(ToggleCalendar) end,
+    timeLocal  = function() pcall(ToggleCalendar) end,
+    friends    = function() pcall(function() ToggleFriendsFrame(1) end) end,
+    rep        = function() pcall(function() ToggleCharacter("ReputationFrame") end) end,
+    sessionGold = function() pcall(OpenAllBags) end,
+}
+
+local INFO_MODULE_TIPS = {
+    zone        = "Click to open Map",
+    coords      = "Click to open Map",
+    gold        = "Click to open Bags",
+    bags        = "Click to open Bags",
+    durability  = "Click to open Character",
+    ilvl        = "Click to open Character",
+    time        = "Click to open Calendar",
+    timeLocal   = "Click to open Calendar",
+    friends     = "Click to open Friends List",
+    rep         = "Click to open Reputations",
+    sessionGold = "Click to open Bags",
+}
 
 -- ============================================
 -- WINDOW SNAPPING AND LINKING SYSTEM
@@ -1481,9 +1586,10 @@ local function RepositionButtons()
         local bannerPadding = (TakeMeHomeDB and TakeMeHomeDB.locked) and 10 or 20
         local height = (numRows * buttonSize) + ((numRows - 1) * buttonSpacing) + bannerPadding
         mainFrame:SetSize(width, height)
-        -- Only show if user wants windows visible and not in combat/pet battle
-        if userWantsWindowsVisible  then
+        if userWantsWindowsVisible and not windowHiddenByBar["main"] then
             mainFrame:Show()
+        elseif windowHiddenByBar["main"] then
+            mainFrame:Hide()
         end
         UpdateMainDragBanner()
     else
@@ -1621,11 +1727,41 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             TakeMeHomeDB.linkedWindows = {}
         end
 
+        -- Ensure infoBarSettings exists
+        if not TakeMeHomeDB.infoBarSettings then
+            TakeMeHomeDB.infoBarSettings = CopyTable(defaults.infoBarSettings)
+        end
+        if TakeMeHomeDB.infoBarSettings.enabled == nil then
+            TakeMeHomeDB.infoBarSettings.enabled = true
+        end
+        if not TakeMeHomeDB.infoBarSettings.modules then
+            TakeMeHomeDB.infoBarSettings.modules = CopyTable(defaults.infoBarSettings.modules)
+        end
+        for key, defaultModule in pairs(defaults.infoBarSettings.modules) do
+            if not TakeMeHomeDB.infoBarSettings.modules[key] then
+                TakeMeHomeDB.infoBarSettings.modules[key] = CopyTable(defaultModule)
+            end
+        end
+        -- Remove legacy att text module if it exists
+        TakeMeHomeDB.infoBarSettings.modules["att"] = nil
+        if TakeMeHomeDB.infoBarSettings.attButton == nil then
+            TakeMeHomeDB.infoBarSettings.attButton = defaults.infoBarSettings.attButton
+        end
+
         -- Ensure all button keys exist
         for key, defaultSettings in pairs(defaults.buttonSettings) do
             if not TakeMeHomeDB.buttonSettings[key] then
                 TakeMeHomeDB.buttonSettings[key] = CopyTable(defaultSettings)
             end
+        end
+
+        -- Restore per-window bar visibility overrides
+        if not TakeMeHomeDB.hiddenWindows then
+            TakeMeHomeDB.hiddenWindows = {}
+        end
+        wipe(windowHiddenByBar)
+        for key, hidden in pairs(TakeMeHomeDB.hiddenWindows) do
+            if hidden then windowHiddenByBar[key] = true end
         end
 
         -- Initialize window registry for snapping/linking
@@ -1651,6 +1787,9 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
         -- Initialize mission table window
         InitializeMissions()
 
+        -- Initialize info bar
+        InitializeInfoBar()
+
         -- Initial update
         C_Timer.After(1, UpdateAllButtons)
 
@@ -1659,6 +1798,7 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             if not InCombatLockdown() then
                 UpdateAllButtons()
             end
+            UpdateInfoBar()
         end)
 
         print("|cff00ff00TakeMeHome|r loaded! Type |cff00ffff/tmh|r for commands.")
@@ -1722,15 +1862,622 @@ local function GetMountInfoBySpellID(spellID)
     return nil
 end
 
--- Create the configuration panel with tabs
-local function CreateConfigPanel()
-    if configFrame then
-        configFrame:Show()
-        return
+-- ============================================
+-- CONFIGURATION PANEL (v1.9 — sidebar nav)
+-- ============================================
+
+local function MakeBackdropFrame(parent, w, h)
+    local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    f:SetSize(w, h)
+    f:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+    f:SetBackdropColor(0.07, 0.07, 0.10, 0.97)
+    f:SetBackdropBorderColor(0.28, 0.28, 0.32, 1)
+    return f
+end
+
+local function MakeLabel(parent, text, font, r, g, b)
+    local fs = parent:CreateFontString(nil, "OVERLAY", font or "GameFontNormal")
+    fs:SetText(text)
+    if r then fs:SetTextColor(r, g, b) end
+    return fs
+end
+
+local function MakeCheckRow(parent, yOff, label, isChecked, onToggle, altText)
+    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    row:SetSize(480, 28)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOff)
+    row:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+    row:SetBackdropColor(0.10, 0.10, 0.13, 0.4)
+    local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+    cb:SetPoint("LEFT", row, "LEFT", 4, 0)
+    cb:SetChecked(isChecked)
+    cb:SetScript("OnClick", function(self) onToggle(self:GetChecked()) end)
+    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+    lbl:SetText(label)
+    if altText then
+        local sub = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sub:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+        sub:SetText(altText)
+        sub:SetTextColor(0.5, 0.5, 0.55)
     end
+    return row, cb
+end
+
+local function MakeUpDownRow(parent, yOff, label, index, totalCount, onUp, onDown, altText, stripeIndex)
+    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    row:SetSize(480, 28)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOff)
+    row:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+    row:SetBackdropColor(0.10, 0.10, 0.13, stripeIndex and stripeIndex%2==0 and 0.5 or 0)
+    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetPoint("LEFT", row, "LEFT", 8, 0)
+    lbl:SetText(label)
+    if altText then
+        local sub = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sub:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+        sub:SetText(altText)
+        sub:SetTextColor(0.5, 0.5, 0.55)
+    end
+    return row
+end
+
+local function CreateConfigPanel()
+    if configFrame then configFrame:Show() return end
+
+    local PANEL_W, PANEL_H = 720, 540
+    local NAV_W = 160
+    local CONTENT_W = PANEL_W - NAV_W - 3
 
     configFrame = CreateFrame("Frame", "TakeMeHomeConfig", UIParent, "BackdropTemplate")
-    configFrame:SetSize(340, 400)
+    configFrame:SetSize(PANEL_W, PANEL_H)
+    configFrame:SetPoint("CENTER")
+    configFrame:SetMovable(true)
+    configFrame:EnableMouse(true)
+    configFrame:RegisterForDrag("LeftButton")
+    configFrame:SetClampedToScreen(true)
+    configFrame:SetFrameStrata("DIALOG")
+    configFrame:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+    configFrame:SetBackdropColor(0.06, 0.06, 0.09, 0.98)
+    configFrame:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+    configFrame:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    configFrame:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
+
+    -- Title bar
+    local titleBar = configFrame:CreateTexture(nil, "ARTWORK")
+    titleBar:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 1, -1)
+    titleBar:SetPoint("TOPRIGHT", configFrame, "TOPRIGHT", -1, -1)
+    titleBar:SetHeight(32)
+    titleBar:SetColorTexture(0.10, 0.10, 0.14, 1)
+
+    local cogTex = configFrame:CreateTexture(nil, "OVERLAY")
+    cogTex:SetSize(20, 20)
+    cogTex:SetPoint("LEFT", configFrame, "LEFT", 10, PANEL_H/2 - 16)
+    cogTex:SetTexture("Interface\\Icons\\Trade_Engineering")
+    cogTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local titleFS = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    titleFS:SetPoint("TOP", configFrame, "TOP", 0, -9)
+    titleFS:SetText("|cff4da6ffTakeMeHome|r  Settings")
+
+    local closeBtn = CreateFrame("Button", nil, configFrame)
+    closeBtn:SetSize(22, 22)
+    closeBtn:SetPoint("TOPRIGHT", configFrame, "TOPRIGHT", -6, -6)
+    local closeBg = closeBtn:CreateTexture(nil, "BACKGROUND")
+    closeBg:SetAllPoints()
+    closeBg:SetColorTexture(0.5, 0.15, 0.15, 0)
+    closeBtn:SetNormalFontObject("GameFontNormal")
+    closeBtn:SetText("×")
+    closeBtn:SetScript("OnEnter", function() closeBg:SetColorTexture(0.7, 0.15, 0.15, 0.9) end)
+    closeBtn:SetScript("OnLeave", function() closeBg:SetColorTexture(0.5, 0.15, 0.15, 0) end)
+    closeBtn:SetScript("OnClick", function() configFrame:Hide() end)
+
+    -- Left navigation panel
+    local navPanel = CreateFrame("Frame", nil, configFrame, "BackdropTemplate")
+    navPanel:SetSize(NAV_W, PANEL_H - 34)
+    navPanel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 1, -33)
+    navPanel:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+    navPanel:SetBackdropColor(0.05, 0.05, 0.08, 1)
+
+    -- Divider between nav and content
+    local divider = configFrame:CreateTexture(nil, "ARTWORK")
+    divider:SetWidth(1)
+    divider:SetPoint("TOPLEFT", navPanel, "TOPRIGHT", 0, 0)
+    divider:SetPoint("BOTTOMLEFT", navPanel, "BOTTOMRIGHT", 0, 0)
+    divider:SetColorTexture(0.25, 0.25, 0.30, 1)
+
+    -- Content area (scrollable)
+    local contentScroll = CreateFrame("ScrollFrame", nil, configFrame, "UIPanelScrollFrameTemplate")
+    contentScroll:SetPoint("TOPLEFT", navPanel, "TOPRIGHT", 4, -4)
+    contentScroll:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -22, 4)
+
+    local contentParent = CreateFrame("Frame", nil, contentScroll)
+    contentParent:SetSize(CONTENT_W - 30, 2000)
+    contentScroll:SetScrollChild(contentParent)
+
+    -- Section content frames (only one shown at a time)
+    local sections = {}
+    local navButtons = {}
+    local activeSection = nil
+
+    local function ShowSection(key)
+        activeSection = key
+        for k, frame in pairs(sections) do
+            if k == key then frame:Show() else frame:Hide() end
+        end
+        for k, btn in pairs(navButtons) do
+            if k == key then btn:SetBackdropColor(0.15, 0.40, 0.70, 1)
+            else              btn:SetBackdropColor(0.10, 0.10, 0.14, 0) end
+        end
+        contentScroll:SetVerticalScroll(0)
+    end
+
+    local function AddSection(key, label, icon)
+        local sec = CreateFrame("Frame", nil, contentParent)
+        sec:SetSize(CONTENT_W - 30, 1800)
+        sec:SetPoint("TOPLEFT")
+        sec:Hide()
+        sections[key] = sec
+
+        -- Nav button
+        local yPos = -(28 * (#navButtons))
+        local navBtn = CreateFrame("Button", nil, navPanel, "BackdropTemplate")
+        navBtn:SetSize(NAV_W, 28)
+        navBtn:SetPoint("TOPLEFT", navPanel, "TOPLEFT", 0, yPos)
+        navBtn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+        navBtn:SetBackdropColor(0.10, 0.10, 0.14, 0)
+        local navHL = navBtn:CreateTexture(nil, "HIGHLIGHT")
+        navHL:SetAllPoints()
+        navHL:SetColorTexture(0.3, 0.5, 0.8, 0.2)
+        if icon then
+            local ic = navBtn:CreateTexture(nil, "ARTWORK")
+            ic:SetSize(16, 16)
+            ic:SetPoint("LEFT", navBtn, "LEFT", 8, 0)
+            ic:SetTexture(icon)
+            ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        end
+        local navLbl = navBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        navLbl:SetPoint("LEFT", navBtn, "LEFT", icon and 30 or 10, 0)
+        navLbl:SetText(label)
+        navBtn:SetScript("OnClick", function() ShowSection(key) end)
+        navButtons[key] = navBtn
+        return sec
+    end
+
+    -- ====================================================
+    -- GENERAL section
+    -- ====================================================
+    local genSec = AddSection("general", "General", "Interface\\Icons\\inv_misc_gear_01")
+    do
+        local y = -8
+        local hdr = genSec:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        hdr:SetPoint("TOPLEFT", genSec, "TOPLEFT", 4, y)
+        hdr:SetText("|cff4da6ffGeneral|r")
+        y = y - 30
+
+        -- Scale slider
+        local scaleLabel = genSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        scaleLabel:SetPoint("TOPLEFT", genSec, "TOPLEFT", 4, y)
+        scaleLabel:SetText("Window Scale")
+        y = y - 22
+
+        local slider = CreateFrame("Slider", nil, genSec, "OptionsSliderTemplate")
+        slider:SetPoint("TOPLEFT", genSec, "TOPLEFT", 4, y)
+        slider:SetWidth(280)
+        slider:SetMinMaxValues(0.4, 1.5)
+        slider:SetValueStep(0.05)
+        slider:SetValue(TakeMeHomeDB and TakeMeHomeDB.scale or 0.75)
+        _G[slider:GetName().."Low"]:SetText("0.4×")
+        _G[slider:GetName().."High"]:SetText("1.5×")
+        _G[slider:GetName().."Text"]:SetText(string.format("%.2f×", slider:GetValue()))
+        slider:SetScript("OnValueChanged", function(self, val)
+            val = math.floor(val * 20 + 0.5) / 20
+            _G[self:GetName().."Text"]:SetText(string.format("%.2f×", val))
+            UpdateScale(val)
+        end)
+        y = y - 48
+
+        -- Lock toggle
+        MakeCheckRow(genSec, y, "Lock all window positions",
+            TakeMeHomeDB and TakeMeHomeDB.locked or false,
+            function(v)
+                TakeMeHomeDB.locked = v
+                UpdateMainDragBanner(); UpdateProfDragBanner()
+                UpdateMountsDragBanner(); UpdateFuncDragBanner()
+            end)
+        y = y - 32
+
+        -- Snap toggle
+        MakeCheckRow(genSec, y, "Enable window snapping",
+            TakeMeHomeDB and TakeMeHomeDB.snapEnabled ~= false or true,
+            function(v) TakeMeHomeDB.snapEnabled = v end)
+        y = y - 48
+
+        -- Reset button
+        local resetBtn = CreateFrame("Button", nil, genSec, "BackdropTemplate")
+        resetBtn:SetSize(160, 26)
+        resetBtn:SetPoint("TOPLEFT", genSec, "TOPLEFT", 4, y)
+        resetBtn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
+        resetBtn:SetBackdropColor(0.20, 0.20, 0.25, 1)
+        resetBtn:SetBackdropBorderColor(0.4, 0.4, 0.45, 1)
+        local resetLbl = resetBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        resetLbl:SetPoint("CENTER")
+        resetLbl:SetText("Reset All Positions")
+        resetBtn:SetScript("OnEnter", function(self) self:SetBackdropColor(0.3, 0.5, 0.7, 1) end)
+        resetBtn:SetScript("OnLeave", function(self) self:SetBackdropColor(0.2, 0.2, 0.25, 1) end)
+        resetBtn:SetScript("OnClick", function()
+            SlashCmdList["TAKEMEHOME"]("reset")
+        end)
+    end
+
+    -- ====================================================
+    -- INFO BAR section
+    -- ====================================================
+    local barSec = AddSection("bar", "Info Bar", "Interface\\Icons\\inv_misc_spyglass_02")
+    do
+        local y = -8
+        local hdr = barSec:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        hdr:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, y)
+        hdr:SetText("|cff4da6ffInfo Bar|r")
+        y = y - 30
+
+        -- Enable bar
+        MakeCheckRow(barSec, y, "Enable Info Bar",
+            TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.enabled or true,
+            function(v) if TakeMeHomeDB.infoBarSettings then TakeMeHomeDB.infoBarSettings.enabled = v; UpdateInfoBar() end end)
+        y = y - 32
+
+        -- Position buttons
+        local posLabel = barSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        posLabel:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, y)
+        posLabel:SetText("Bar Position:")
+        y = y - 26
+
+        local function MakePosBtn(parent, yy, label, posVal)
+            local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+            btn:SetSize(80, 24)
+            btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 4 + (posVal == "TOP" and 88 or 0), yy)
+            btn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
+            local isActive = TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.position == posVal
+            btn:SetBackdropColor(isActive and 0.2 or 0.12, isActive and 0.5 or 0.12, isActive and 0.8 or 0.15, 1)
+            btn:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+            local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lbl:SetPoint("CENTER")
+            lbl:SetText(label)
+            btn:SetScript("OnClick", function()
+                if TakeMeHomeDB.infoBarSettings then
+                    TakeMeHomeDB.infoBarSettings.position = posVal
+                    UpdateInfoBarPosition()
+                    -- Refresh section
+                    ShowSection("bar")
+                end
+            end)
+            return btn
+        end
+        MakePosBtn(barSec, y, "Bottom", "BOTTOM")
+        MakePosBtn(barSec, y, "Top",    "TOP")
+        y = y - 34
+
+        -- ATT button toggle (if ATT loaded)
+        if C_AddOns.IsAddOnLoaded("AllTheThings") then
+            local attRow, attCB = MakeCheckRow(barSec, y,
+                "|cffcc99ffAll The Things|r expansion menu",
+                TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.attButton ~= false or true,
+                function(v)
+                    TakeMeHomeDB.infoBarSettings.attButton = v
+                    print("|cff00ff00TakeMeHome|r: Reload UI to apply ATT button change.")
+                end)
+            y = y - 36
+        end
+
+        -- Modules header
+        local modHdr = barSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        modHdr:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, y)
+        modHdr:SetText("|cff888888Text Modules|r")
+        y = y - 22
+
+        local secColors = { left="|cff88aaff", center="|cff88ffaa", right="|cffffaa88" }
+        for i, mod in ipairs(INFO_BAR_MODULES) do
+            local addonLoaded = not mod.addonName or C_AddOns.IsAddOnLoaded(mod.addonName)
+            local settings = TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.modules[mod.key]
+            local row = CreateFrame("Frame", nil, barSec, "BackdropTemplate")
+            row:SetSize(480, 26)
+            row:SetPoint("TOPLEFT", barSec, "TOPLEFT", 0, y)
+            row:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+            row:SetBackdropColor(0.10, 0.10, 0.13, i%2==0 and 0.5 or 0)
+
+            local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+            cb:SetPoint("LEFT", row, "LEFT", 4, 0)
+            cb:SetChecked(settings and settings.enabled or false)
+            cb.modKey = mod.key
+            if addonLoaded then
+                cb:SetScript("OnClick", function(self)
+                    if TakeMeHomeDB.infoBarSettings.modules[self.modKey] then
+                        TakeMeHomeDB.infoBarSettings.modules[self.modKey].enabled = self:GetChecked()
+                        UpdateInfoBar()
+                    end
+                end)
+            else
+                cb:SetEnabled(false); cb:SetAlpha(0.4)
+            end
+
+            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+            lbl:SetText(mod.name)
+            if not addonLoaded then lbl:SetTextColor(0.5,0.5,0.5) end
+
+            local secLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            secLbl:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+            local hasClick = INFO_MODULE_ACTIONS[mod.key] ~= nil
+            local secText = (secColors[mod.section] or "|cff888888") .. mod.section .. "|r"
+            if hasClick then secText = secText .. " |cff44ff88⊕|r" end
+            secLbl:SetText(secText)
+
+            y = y - 27
+        end
+    end
+
+    -- ====================================================
+    -- TRAVEL section
+    -- ====================================================
+    local travelSec = AddSection("travel", "Travel",  "Interface\\Icons\\inv_misc_rune_01")
+    do
+        local y = -8
+        local hdr = travelSec:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        hdr:SetPoint("TOPLEFT", travelSec, "TOPLEFT", 4, y)
+        hdr:SetText("|cff4da6ffTravel Buttons|r")
+        y = y - 30
+
+        for i, def in ipairs(BUTTON_DEFINITIONS) do
+            local row = CreateFrame("Frame", nil, travelSec, "BackdropTemplate")
+            row:SetSize(480, 28)
+            row:SetPoint("TOPLEFT", travelSec, "TOPLEFT", 0, y)
+            row:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+            row:SetBackdropColor(0.10, 0.10, 0.13, i%2==0 and 0.5 or 0)
+            local cb = CreateFrame("CheckButton", "TakeMeHomeTravelCheck2"..def.key, row, "UICheckButtonTemplate")
+            cb:SetPoint("LEFT", row, "LEFT", 4, 0)
+            if TakeMeHomeDB and TakeMeHomeDB.buttonSettings and TakeMeHomeDB.buttonSettings[def.key] then
+                cb:SetChecked(TakeMeHomeDB.buttonSettings[def.key].enabled)
+            end
+            cb.key = def.key
+            cb:SetScript("OnClick", function(self)
+                TakeMeHomeDB.buttonSettings[self.key].enabled = self:GetChecked()
+                UpdateAllButtons()
+            end)
+            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+            lbl:SetText(def.name)
+            local rowLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            rowLbl:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+            rowLbl:SetText("|cff888888Row " .. def.row .. "|r")
+            y = y - 30
+        end
+    end
+
+    -- ====================================================
+    -- PROFESSIONS section
+    -- ====================================================
+    local profSec = AddSection("professions", "Professions", "Interface\\Icons\\trade_alchemy")
+    do
+        local y = -8
+        local hdr = profSec:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        hdr:SetPoint("TOPLEFT", profSec, "TOPLEFT", 4, y)
+        hdr:SetText("|cff4da6ffProfessions|r")
+        y = y - 30
+
+        local function RefreshProfSection()
+            for _, c in ipairs({profSec:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+            local profs = GetLearnedProfessions()
+            if #profs == 0 then
+                local msg = profSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                msg:SetPoint("TOPLEFT", profSec, "TOPLEFT", 4, -8)
+                msg:SetText("No crafting professions learned")
+                msg:SetTextColor(0.5, 0.5, 0.5)
+                return
+            end
+            table.sort(profs, function(a,b) return GetProfessionOrder(a.name) < GetProfessionOrder(b.name) end)
+            local ly = -8
+            for i, prof in ipairs(profs) do
+                if not TakeMeHomeDB.professionSettings[prof.name] then
+                    TakeMeHomeDB.professionSettings[prof.name] = { enabled=true, order=i }
+                end
+                local row = CreateFrame("Frame", nil, profSec, "BackdropTemplate")
+                row:SetSize(480, 28)
+                row:SetPoint("TOPLEFT", profSec, "TOPLEFT", 0, ly)
+                row:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+                row:SetBackdropColor(0.10, 0.10, 0.13, i%2==0 and 0.5 or 0)
+                local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+                cb:SetPoint("LEFT", row, "LEFT", 4, 0)
+                cb:SetChecked(IsProfessionEnabled(prof.name))
+                cb.profName = prof.name
+                cb:SetScript("OnClick", function(self)
+                    TakeMeHomeDB.professionSettings[self.profName].enabled = self:GetChecked()
+                    UpdateProfessionButtons()
+                end)
+                local ic = row:CreateTexture(nil, "ARTWORK")
+                ic:SetSize(18, 18); ic:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+                ic:SetTexture(prof.icon); ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                lbl:SetPoint("LEFT", ic, "RIGHT", 4, 0)
+                lbl:SetText(prof.name)
+                ly = ly - 30
+            end
+        end
+        RefreshProfSection()
+    end
+
+    -- ====================================================
+    -- MOUNTS section
+    -- ====================================================
+    local mountsSec = AddSection("mounts", "Mounts", "Interface\\Icons\\ability_mount_mountainram")
+    do
+        local y = -8
+        local hdr = mountsSec:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        hdr:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 4, y)
+        hdr:SetText("|cff4da6ffMounts|r  |cff888888(max 6)|r")
+        y = y - 30
+
+        local function RefreshMountsSection()
+            for _, c in ipairs({mountsSec:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+            local sel = TakeMeHomeDB.selectedMounts or {}
+            local ly = -8
+            local hdr2 = mountsSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            hdr2:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 4, ly)
+            hdr2:SetText(string.format("|cff4da6ffSelected (%d/6)|r", #sel))
+            ly = ly - 22
+
+            for i, me in ipairs(sel) do
+                local name, icon, collected = GetMountInfoBySpellID(me.spellID)
+                local row = CreateFrame("Frame", nil, mountsSec, "BackdropTemplate")
+                row:SetSize(480, 26)
+                row:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 0, ly)
+                row:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+                row:SetBackdropColor(0.10, 0.10, 0.13, i%2==0 and 0.95 or 0.85)
+                local ic = row:CreateTexture(nil, "ARTWORK")
+                ic:SetSize(18,18); ic:SetPoint("LEFT", row, "LEFT", 5, 0)
+                if icon then ic:SetTexture(icon); ic:SetTexCoord(0.08,0.92,0.08,0.92) end
+                if not collected then ic:SetDesaturated(true) end
+                local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                lbl:SetPoint("LEFT", ic, "RIGHT", 4, 0); lbl:SetWidth(200)
+                lbl:SetText(name or "Unknown")
+                if not collected then lbl:SetTextColor(0.5,0.5,0.5) end
+                local remBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
+                remBtn:SetSize(20,18); remBtn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+                remBtn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
+                remBtn:SetBackdropColor(0.4, 0.1, 0.1, 1)
+                local rl = remBtn:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); rl:SetPoint("CENTER"); rl:SetText("×")
+                remBtn.idx = i
+                remBtn:SetScript("OnClick", function(self)
+                    table.remove(TakeMeHomeDB.selectedMounts, self.idx)
+                    UpdateMountButtons(); RefreshMountsSection()
+                end)
+                ly = ly - 28
+            end
+
+            if #sel < 6 then
+                ly = ly - 10
+                local addHdr = mountsSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                addHdr:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 4, ly)
+                addHdr:SetText("|cff4da6ffAdd Mount|r")
+                ly = ly - 22
+                local sb = CreateFrame("EditBox", "TakeMeHomeMountSearch2", mountsSec, "InputBoxTemplate")
+                sb:SetSize(300, 22); sb:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 8, ly)
+                sb:SetAutoFocus(false); sb:SetMaxLetters(50)
+                ly = ly - 28
+                local rc = CreateFrame("Frame", nil, mountsSec)
+                rc:SetSize(480, 120); rc:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 0, ly)
+                local function DoSearch(txt)
+                    for _, c in ipairs({rc:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+                    if not txt or txt=="" then return end
+                    txt = txt:lower()
+                    local results, n = {}, 0
+                    for _, mid in ipairs(C_MountJournal.GetMountIDs()) do
+                        local mn, ms, mi, _, _, _, _, _, _, _, mc = C_MountJournal.GetMountInfoByID(mid)
+                        if mc and mn and mn:lower():find(txt, 1, true) then
+                            local already = false
+                            for _, sm in ipairs(TakeMeHomeDB.selectedMounts) do if sm.spellID==ms then already=true; break end end
+                            if not already then table.insert(results,{name=mn,spellID=ms,icon=mi}); n=n+1; if n>=5 then break end end
+                        end
+                    end
+                    local ry=0
+                    for _, res in ipairs(results) do
+                        local rr = CreateFrame("Frame", nil, rc, "BackdropTemplate")
+                        rr:SetSize(470, 22); rr:SetPoint("TOPLEFT", rc, "TOPLEFT", 0, ry)
+                        rr:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8" })
+                        rr:SetBackdropColor(0.12,0.12,0.15,0.8)
+                        local ri = rr:CreateTexture(nil,"ARTWORK"); ri:SetSize(16,16)
+                        ri:SetPoint("LEFT",rr,"LEFT",4,0); ri:SetTexture(res.icon); ri:SetTexCoord(0.08,0.92,0.08,0.92)
+                        local rl2 = rr:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+                        rl2:SetPoint("LEFT",ri,"RIGHT",4,0); rl2:SetWidth(200); rl2:SetText(res.name)
+                        local ab = CreateFrame("Button", nil, rr, "BackdropTemplate")
+                        ab:SetSize(26,18); ab:SetPoint("RIGHT",rr,"RIGHT",-4,0)
+                        ab:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
+                        ab:SetBackdropColor(0.1,0.3,0.1,1)
+                        local al2 = ab:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); al2:SetPoint("CENTER"); al2:SetText("+")
+                        ab.sID = res.spellID
+                        ab:SetScript("OnClick", function(self)
+                            if #TakeMeHomeDB.selectedMounts >= 6 then return end
+                            table.insert(TakeMeHomeDB.selectedMounts, {spellID=self.sID})
+                            UpdateMountButtons(); sb:SetText(""); RefreshMountsSection()
+                        end)
+                        ry = ry - 24
+                    end
+                end
+                sb:SetScript("OnTextChanged", function(self) DoSearch(self:GetText()) end)
+                sb:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+            end
+        end
+        RefreshMountsSection()
+    end
+
+    -- ====================================================
+    -- FUNCTION section
+    -- ====================================================
+    local funcSec = AddSection("function", "Function", "Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up")
+    do
+        local y = -8
+        local hdr = funcSec:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        hdr:SetPoint("TOPLEFT", funcSec, "TOPLEFT", 4, y)
+        hdr:SetText("|cff4da6ffFunction Buttons|r")
+        y = y - 30
+
+        local FUNC_DEFS_CFG = {
+            { key="logout",     name="Logout" },
+            { key="afk",        name="AFK Toggle" },
+            { key="sit",        name="Sit / Stand" },
+            { key="screenshot", name="Screenshot" },
+            { key="lootspec",   name="Loot Spec Cycle" },
+            { key="readycheck", name="Ready Check" },
+            { key="openbags",   name="Open All Bags" },
+        }
+        for i, def in ipairs(FUNC_DEFS_CFG) do
+            local enabled = true
+            if TakeMeHomeDB and TakeMeHomeDB.functionSettings and TakeMeHomeDB.functionSettings[def.key] then
+                enabled = TakeMeHomeDB.functionSettings[def.key].enabled
+            end
+            local row, cb = MakeCheckRow(funcSec, y, def.name, enabled, function(v)
+                if not TakeMeHomeDB.functionSettings then TakeMeHomeDB.functionSettings={} end
+                if not TakeMeHomeDB.functionSettings[def.key] then
+                    TakeMeHomeDB.functionSettings[def.key] = { enabled=true, order=i }
+                end
+                TakeMeHomeDB.functionSettings[def.key].enabled = v
+                UpdateFunctionButtons()
+            end)
+            y = y - 30
+        end
+    end
+
+    -- ====================================================
+    -- MISSIONS section
+    -- ====================================================
+    local missSec = AddSection("missions", "Missions", "Interface\\Icons\\inv_garrison_resource")
+    do
+        local y = -8
+        local hdr = missSec:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        hdr:SetPoint("TOPLEFT", missSec, "TOPLEFT", 4, y)
+        hdr:SetText("|cff4da6ffMission Tables|r")
+        y = y - 30
+
+        for i, def in ipairs(MISSION_TABLE_DEFINITIONS) do
+            local enabled = TakeMeHomeDB and TakeMeHomeDB.missionSettings and TakeMeHomeDB.missionSettings[def.key]
+            enabled = enabled and enabled.enabled ~= false
+            local row, cb = MakeCheckRow(missSec, y, def.name, enabled, function(v)
+                if TakeMeHomeDB.missionSettings and TakeMeHomeDB.missionSettings[def.key] then
+                    TakeMeHomeDB.missionSettings[def.key].enabled = v
+                    UpdateMissionButtons()
+                end
+            end)
+            y = y - 30
+        end
+    end
+
+    -- Show General by default
+    ShowSection("general")
+    configFrame:Show()
+end
+
+    configFrame = CreateFrame("Frame", "TakeMeHomeConfig", UIParent, "BackdropTemplate")
+    configFrame:SetSize(380, 440)
     configFrame:SetPoint("CENTER")
     configFrame:SetMovable(true)
     configFrame:EnableMouse(true)
@@ -1830,13 +2577,18 @@ local function CreateConfigPanel()
     functionContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
     functionContent:Hide()
 
-    local contentFrames = { travelContent, professionsContent, mountsContent, functionContent }
+    local infoBarContent = CreateFrame("Frame", nil, configFrame)
+    infoBarContent:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 10, -65)
+    infoBarContent:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -10, 35)
+    infoBarContent:Hide()
+
+    local contentFrames = { travelContent, professionsContent, mountsContent, functionContent, infoBarContent }
     local tabButtons = {}
 
     -- Create tab button helper
     local function CreateTabButton(parent, text, index)
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn:SetSize(75, 24)
+        btn:SetSize(68, 24)
         btn:SetBackdrop({
             bgFile = "Interface\\BUTTONS\\WHITE8X8",
             edgeFile = "Interface\\BUTTONS\\WHITE8X8",
@@ -1904,6 +2656,10 @@ local function CreateConfigPanel()
     local functionTab = CreateTabButton(tabContainer, "Function", 4)
     functionTab:SetPoint("LEFT", mountsTab, "RIGHT", 5, 0)
     table.insert(tabButtons, functionTab)
+
+    local barTab = CreateTabButton(tabContainer, "Bar", 5)
+    barTab:SetPoint("LEFT", functionTab, "RIGHT", 5, 0)
+    table.insert(tabButtons, barTab)
 
     -- =====================
     -- TRAVEL TAB CONTENT
@@ -2369,10 +3125,166 @@ local function CreateConfigPanel()
     -- Refresh function tab when shown
     functionTab:HookScript("OnClick", RefreshFunctionTab)
 
+    -- =====================
+    -- BAR TAB CONTENT
+    -- =====================
+    local function RefreshBarTab()
+        -- Clear existing children and regions
+        for _, child in ipairs({ infoBarContent:GetChildren() }) do
+            child:Hide()
+            child:SetParent(nil)
+        end
+        for _, region in ipairs({ infoBarContent:GetRegions() }) do
+            region:Hide()
+            region:SetParent(nil)
+        end
+
+        if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
+
+        local yOffset = 0
+
+        -- Enable bar row
+        local enableRow = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
+        enableRow:SetSize(340, 30)
+        enableRow:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
+        enableRow:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
+        enableRow:SetBackdropColor(0.12, 0.12, 0.15, 0.5)
+
+        local enableCheck = CreateFrame("CheckButton", nil, enableRow, "UICheckButtonTemplate")
+        enableCheck:SetPoint("LEFT", enableRow, "LEFT", 5, 0)
+        enableCheck:SetChecked(TakeMeHomeDB.infoBarSettings.enabled)
+        enableCheck:SetScript("OnClick", function(self)
+            TakeMeHomeDB.infoBarSettings.enabled = self:GetChecked()
+            UpdateInfoBar()
+        end)
+
+        local enableLabel = enableRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        enableLabel:SetPoint("LEFT", enableCheck, "RIGHT", 2, 0)
+        enableLabel:SetText("Enable Info Bar")
+        yOffset = yOffset - 34
+
+        -- Position row
+        local posRow = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
+        posRow:SetSize(340, 30)
+        posRow:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
+        posRow:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
+        posRow:SetBackdropColor(0.12, 0.12, 0.15, 0)
+
+        local posLabel = posRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        posLabel:SetPoint("LEFT", posRow, "LEFT", 10, 0)
+        posLabel:SetText("Position:")
+
+        local botBtn = CreateModernButton(posRow, 60, "Bottom")
+        botBtn:SetPoint("LEFT", posLabel, "RIGHT", 10, 0)
+
+        local topBtn = CreateModernButton(posRow, 60, "Top")
+        topBtn:SetPoint("LEFT", botBtn, "RIGHT", 5, 0)
+
+        local function RefreshPosButtons()
+            if TakeMeHomeDB.infoBarSettings.position == "TOP" then
+                topBtn:SetBackdropColor(0.2, 0.5, 0.8, 1)
+                botBtn:SetBackdropColor(0.2, 0.2, 0.25, 1)
+            else
+                botBtn:SetBackdropColor(0.2, 0.5, 0.8, 1)
+                topBtn:SetBackdropColor(0.2, 0.2, 0.25, 1)
+            end
+        end
+        RefreshPosButtons()
+
+        botBtn:SetScript("OnClick", function()
+            TakeMeHomeDB.infoBarSettings.position = "BOTTOM"
+            UpdateInfoBarPosition()
+            RefreshPosButtons()
+        end)
+        topBtn:SetScript("OnClick", function()
+            TakeMeHomeDB.infoBarSettings.position = "TOP"
+            UpdateInfoBarPosition()
+            RefreshPosButtons()
+        end)
+        yOffset = yOffset - 36
+
+        -- ATT button toggle (only shown if ATT is loaded)
+        if C_AddOns.IsAddOnLoaded("AllTheThings") then
+            local attRow = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
+            attRow:SetSize(340, 30)
+            attRow:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
+            attRow:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
+            attRow:SetBackdropColor(0.10, 0.06, 0.18, 0.6)
+
+            local attCheck = CreateFrame("CheckButton", nil, attRow, "UICheckButtonTemplate")
+            attCheck:SetPoint("LEFT", attRow, "LEFT", 5, 0)
+            attCheck:SetChecked(TakeMeHomeDB.infoBarSettings.attButton ~= false)
+            attCheck:SetScript("OnClick", function(self)
+                TakeMeHomeDB.infoBarSettings.attButton = self:GetChecked()
+                print("|cff00ff00TakeMeHome|r: Reload UI to apply ATT button change.")
+            end)
+
+            local attRowLabel = attRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            attRowLabel:SetPoint("LEFT", attCheck, "RIGHT", 2, 0)
+            attRowLabel:SetText("|cffcc99ffAll The Things|r expansion menu")
+
+            yOffset = yOffset - 34
+        end
+
+        -- Section header
+        local sepLabel = infoBarContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sepLabel:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 5, yOffset)
+        sepLabel:SetText("|cff888888Text Modules|r")
+        yOffset = yOffset - 20
+
+        -- Module rows
+        local sectionColors = { left = "|cff88aaff", center = "|cff88ffaa", right = "|cffffaa88" }
+        for i, mod in ipairs(INFO_BAR_MODULES) do
+            local addonLoaded = not mod.addonName or C_AddOns.IsAddOnLoaded(mod.addonName)
+
+            local row = CreateFrame("Frame", nil, infoBarContent, "BackdropTemplate")
+            row:SetSize(340, 26)
+            row:SetPoint("TOPLEFT", infoBarContent, "TOPLEFT", 0, yOffset)
+            row:SetBackdrop({ bgFile = "Interface\\BUTTONS\\WHITE8X8" })
+            row:SetBackdropColor(0.12, 0.12, 0.15, (i % 2 == 0) and 0.5 or 0)
+
+            local settings = TakeMeHomeDB.infoBarSettings.modules[mod.key]
+            local checkbox = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+            checkbox:SetPoint("LEFT", row, "LEFT", 5, 0)
+            checkbox:SetChecked(settings and settings.enabled or false)
+            checkbox.modKey = mod.key
+            if addonLoaded then
+                checkbox:SetScript("OnClick", function(self)
+                    TakeMeHomeDB.infoBarSettings.modules[self.modKey].enabled = self:GetChecked()
+                    UpdateInfoBar()
+                end)
+            else
+                checkbox:SetEnabled(false)
+                checkbox:SetAlpha(0.4)
+            end
+
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            label:SetPoint("LEFT", checkbox, "RIGHT", 2, 0)
+            label:SetText(mod.name)
+            if not addonLoaded then label:SetTextColor(0.5, 0.5, 0.5) end
+
+            -- Right side: section tag, or "not installed" for addon modules
+            local secLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            secLabel:SetPoint("RIGHT", row, "RIGHT", -5, 0)
+            if mod.addonName and not addonLoaded then
+                secLabel:SetText("|cffff6644not installed|r")
+            elseif mod.addonName then
+                secLabel:SetText("|cff44ff88" .. mod.addonName .. "|r")
+            else
+                secLabel:SetText((sectionColors[mod.section] or "|cff888888") .. mod.section .. "|r")
+            end
+
+            yOffset = yOffset - 28
+        end
+    end
+
+    barTab:HookScript("OnClick", RefreshBarTab)
+
     -- Initial population of tabs (so they're not empty when first opened)
     RefreshProfessionsTab()
     RefreshMountsTab()
     RefreshFunctionTab()
+    RefreshBarTab()
 
     -- Instructions
     local instructions = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -2646,8 +3558,7 @@ UpdateProfessionButtons = function()
     local height = (numRows * profButtonSize) + ((numRows - 1) * profButtonSpacing) + bannerPadding
 
     professionFrame:SetSize(width, height)
-    -- Only show if user wants windows visible and not in combat/pet battle
-    if userWantsWindowsVisible  then
+    if userWantsWindowsVisible and not windowHiddenByBar["professions"] then
         professionFrame:Show()
     end
     UpdateProfDragBanner()
@@ -2942,8 +3853,7 @@ UpdateMountButtons = function()
     local height = (numRows * mountButtonSize) + ((numRows - 1) * mountButtonSpacing) + bannerPadding
 
     mountsFrame:SetSize(width, height)
-    -- Only show if user wants windows visible and not in combat/pet battle
-    if userWantsWindowsVisible  then
+    if userWantsWindowsVisible and not windowHiddenByBar["mounts"] then
         mountsFrame:Show()
     end
     UpdateMountsDragBanner()
@@ -3199,8 +4109,7 @@ UpdateFunctionButtons = function()
     local height = (numRows * funcButtonSize) + ((numRows - 1) * funcButtonSpacing) + bannerPadding
 
     functionFrame:SetSize(width, height)
-    -- Only show if user wants windows visible and not in combat/pet battle
-    if userWantsWindowsVisible  then
+    if userWantsWindowsVisible and not windowHiddenByBar["function"] then
         functionFrame:Show()
     end
     UpdateFuncDragBanner()
@@ -3489,8 +4398,7 @@ UpdateMissionButtons = function()
     local height = (numRows * missionButtonSize) + ((numRows - 1) * missionButtonSpacing) + bannerPadding
 
     missionFrame:SetSize(width, height)
-    -- Only show if user wants windows visible and not in combat/pet battle
-    if userWantsWindowsVisible  then
+    if userWantsWindowsVisible and not windowHiddenByBar["missions"] then
         missionFrame:Show()
     end
     UpdateMissionDragBanner()
@@ -3507,6 +4415,619 @@ InitializeMissions = function()
 
     -- Delay to ensure data is loaded
     C_Timer.After(2, UpdateMissionButtons)
+end
+
+-- ============================================
+-- INFO BAR
+-- ============================================
+
+local infoBarToggleButtons = {}
+
+local infoBar = CreateFrame("Frame", "TakeMeHomeInfoBar", UIParent, "BackdropTemplate")
+infoBar:SetHeight(22)
+infoBar:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, 0)
+infoBar:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0, 0)
+infoBar:SetFrameStrata("MEDIUM")
+infoBar:SetFrameLevel(1)
+infoBar:Hide()
+
+infoBar:SetBackdrop({
+    bgFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+    edgeSize = 1,
+    insets = { left = 0, right = 0, top = 1, bottom = 0 }
+})
+infoBar:SetBackdropColor(0.05, 0.05, 0.08, 0.88)
+infoBar:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.8)
+
+-- Individual module button registry (populated in InitializeInfoBar)
+local infoBarModuleBtns  = {}
+local infoBarLeftOffset  = 8   -- updated in InitializeInfoBar after toggle+ATT buttons
+local infoBarCogButton   = nil
+
+local INFO_SEP = " |cff2a2a40||r "
+
+-- Creates one clickable Button for an info bar module
+local function CreateInfoModuleBtn(key, section)
+    local btn = CreateFrame("Button", nil, infoBar)
+    btn:SetHeight(20)
+    btn:SetWidth(10)
+
+    local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetAllPoints()
+    lbl:SetJustifyH("CENTER")
+    lbl:SetJustifyV("MIDDLE")
+    lbl:SetWordWrap(false)
+    btn.lbl = lbl
+
+    btn.modKey  = key
+    btn.section = section
+
+    if INFO_MODULE_ACTIONS[key] then
+        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.08)
+        btn:SetScript("OnClick", function(self) INFO_MODULE_ACTIONS[self.modKey]() end)
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            local rawText = self.lbl:GetText() or ""
+            -- Strip color codes for tooltip title
+            GameTooltip:SetText(rawText:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""), 1, 1, 1)
+            local tip = INFO_MODULE_TIPS[self.modKey]
+            if tip then GameTooltip:AddLine(tip, 0.6, 0.6, 0.6) end
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    return btn
+end
+
+-- Reflows all module button positions after text updates
+local function ReflowInfoBar()
+    if not infoBar:IsShown() then return end
+    local barW = infoBar:GetWidth()
+    if not barW or barW < 10 then return end
+
+    local pad = 6
+    local left, center, right = {}, {}, {}
+
+    for _, btn in ipairs(infoBarModuleBtns) do
+        if btn:IsShown() then
+            local tw = btn.lbl:GetStringWidth()
+            if tw and tw > 0 then btn:SetWidth(tw + 2) end
+            if     btn.section == "left"   then table.insert(left,   btn)
+            elseif btn.section == "center" then table.insert(center, btn)
+            else                                table.insert(right,  btn) end
+        end
+    end
+
+    -- Left
+    local lx = infoBarLeftOffset
+    for _, btn in ipairs(left) do
+        btn:ClearAllPoints()
+        btn:SetPoint("LEFT", infoBar, "LEFT", lx, 0)
+        lx = lx + btn:GetWidth() + pad
+    end
+
+    -- Right (leaves room for cog: 22px + 6px gap)
+    local rx = 28
+    for i = #right, 1, -1 do
+        local btn = right[i]
+        btn:ClearAllPoints()
+        btn:SetPoint("RIGHT", infoBar, "RIGHT", -rx, 0)
+        rx = rx + btn:GetWidth() + pad
+    end
+
+    -- Center
+    if #center > 0 then
+        local tw = 0
+        for i, btn in ipairs(center) do
+            tw = tw + btn:GetWidth() + (i < #center and pad or 0)
+        end
+        local cx = math.floor((barW - tw) / 2)
+        for _, btn in ipairs(center) do
+            btn:ClearAllPoints()
+            btn:SetPoint("LEFT", infoBar, "LEFT", cx, 0)
+            cx = cx + btn:GetWidth() + pad
+        end
+    end
+end
+
+local function FormatGold(money)
+    if money <= 0 then return "|cff8888880c|r" end
+    local g = math.floor(money / 10000)
+    local s = math.floor((money % 10000) / 100)
+    local c = money % 100
+    if g >= 1000000 then
+        return string.format("|cffd4af37%.2fM|r|cff888888g|r", g / 1000000)
+    elseif g > 0 then
+        local gStr = g >= 1000 and string.format("%d,%03d", math.floor(g / 1000), g % 1000) or tostring(g)
+        return "|cffd4af37" .. gStr .. "|r|cff888888g |r|cffc0c0c0" .. s .. "|r|cff888888s|r"
+    elseif s > 0 then
+        return "|cffc0c0c0" .. s .. "|r|cff888888s |r|cffcd7f32" .. c .. "|r|cff888888c|r"
+    else
+        return "|cffcd7f32" .. c .. "|r|cff888888c|r"
+    end
+end
+
+local function GetInfoModuleText(key)
+    if key == "zone" then
+        local zone = GetRealZoneText() or ""
+        local subzone = GetSubZoneText() or ""
+        if subzone ~= "" and subzone ~= zone then
+            return "|cffadd8e6" .. subzone .. "|r |cff666677(" .. zone .. ")|r"
+        end
+        return "|cffadd8e6" .. zone .. "|r"
+
+    elseif key == "coords" then
+        local mapID = C_Map.GetBestMapForUnit("player")
+        if mapID then
+            local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+            if pos then
+                return string.format("|cff888888(|r|cffffffff%.1f, %.1f|r|cff888888)|r", pos.x * 100, pos.y * 100)
+            end
+        end
+        return ""
+
+    elseif key == "gold" then
+        return FormatGold(GetMoney())
+
+    elseif key == "bags" then
+        local free, total = 0, 0
+        for i = 0, 4 do
+            local slots = C_Container.GetContainerNumSlots(i)
+            total = total + slots
+            for j = 1, slots do
+                if not C_Container.GetContainerItemInfo(i, j) then
+                    free = free + 1
+                end
+            end
+        end
+        local color = free <= 4 and "|cffff4444" or free <= 10 and "|cffffff44" or "|cff44ff44"
+        return "|cff888888Bags |r" .. color .. free .. "|r|cff888888/" .. total .. "|r"
+
+    elseif key == "durability" then
+        local lowest = 100
+        for slot = 1, 18 do
+            local cur, max = GetInventoryItemDurability(slot)
+            if cur and max and max > 0 then
+                local pct = math.floor(cur / max * 100)
+                if pct < lowest then lowest = pct end
+            end
+        end
+        if lowest == 100 then return "" end
+        local color = lowest <= 20 and "|cffff4444" or lowest <= 50 and "|cffffff44" or "|cff44ff44"
+        return "|cff888888Dur |r" .. color .. lowest .. "%|r"
+
+    elseif key == "fps" then
+        local fps = math.floor(GetFramerate())
+        local color = fps < 20 and "|cffff4444" or fps < 40 and "|cffffff44" or "|cff44ff44"
+        return "|cff888888FPS |r" .. color .. fps .. "|r"
+
+    elseif key == "latency" then
+        local _, _, lagHome, lagWorld = GetNetStats()
+        local lag = math.max(lagHome or 0, lagWorld or 0)
+        local color = lag > 300 and "|cffff4444" or lag > 150 and "|cffffff44" or "|cff44ff44"
+        return "|cff888888MS |r" .. color .. lag .. "|r"
+
+    elseif key == "time" then
+        local h, m = GetGameTime()
+        return string.format("|cff888888Srv |r|cffadd8e6%02d:%02d|r", h, m)
+
+    elseif key == "xp" then
+        if UnitLevel("player") >= GetMaxPlayerLevel() then return "" end
+        local xp = UnitXP("player")
+        local maxXP = UnitXPMax("player")
+        if maxXP == 0 then return "" end
+        local pct = math.floor(xp / maxXP * 100)
+        return "|cff888888XP |r|cff8888ff" .. pct .. "%|r"
+
+    elseif key == "ilvl" then
+        local equipped, _ = GetAverageItemLevel()
+        if not equipped or equipped == 0 then return "" end
+        return "|cff888888iLvl |r|cffffffff" .. math.floor(equipped) .. "|r"
+
+    elseif key == "rep" then
+        local ok, result = pcall(function()
+            if C_Reputation and C_Reputation.GetWatchedFactionData then
+                local d = C_Reputation.GetWatchedFactionData()
+                if d and d.name then
+                    local cur = (d.currentValue or 0) - (d.currentReactionThreshold or 0)
+                    local max = (d.nextReactionThreshold or 1) - (d.currentReactionThreshold or 0)
+                    if max > 0 then
+                        local pct = math.floor(cur / max * 100)
+                        return "|cff888888" .. d.name:sub(1, 18) .. " |r|cffadd8e6" .. pct .. "%|r"
+                    end
+                end
+            end
+            local name, _, min, max, value = GetWatchedFactionInfo()
+            if name and max and max > min then
+                local pct = math.floor((value - min) / (max - min) * 100)
+                return "|cff888888" .. name:sub(1, 18) .. " |r|cffadd8e6" .. pct .. "%|r"
+            end
+            return nil
+        end)
+        if ok and result then return result end
+        return ""
+
+    elseif key == "sessionGold" then
+        if not sessionGoldStart then return "" end
+        local delta = GetMoney() - sessionGoldStart
+        if delta == 0 then return "" end
+        local color = delta > 0 and "|cff44ff44" or "|cffff4444"
+        local sign  = delta > 0 and "+" or "-"
+        local abs   = math.abs(delta)
+        local g     = math.floor(abs / 10000)
+        local s     = math.floor((abs % 10000) / 100)
+        local str
+        if g > 0 then
+            str = g >= 1000 and string.format("%d,%03dg", math.floor(g/1000), g%1000) .. " " .. s .. "s"
+                           or   g .. "g " .. s .. "s"
+        elseif s > 0 then
+            str = s .. "s"
+        else
+            str = (abs % 100) .. "c"
+        end
+        return "|cff888888Sesh |r" .. color .. sign .. str .. "|r"
+
+    elseif key == "memory" then
+        UpdateAddOnMemoryUsage()
+        local total = 0
+        for i = 1, C_AddOns.GetNumAddOns() do
+            total = total + GetAddOnMemoryUsage(i)
+        end
+        local mb = total / 1024
+        local color = mb > 300 and "|cffff4444" or mb > 150 and "|cffffff44" or "|cff44ff44"
+        return "|cff888888Mem |r" .. color .. string.format("%.0f", mb) .. "|r|cff888888MB|r"
+
+    elseif key == "timeLocal" then
+        return string.format("|cff888888Local |r|cffadd8e6%s|r", date("%H:%M"))
+
+    elseif key == "friends" then
+        local ok, result = pcall(function()
+            local onF = C_FriendList.GetNumOnlineFriends()
+            local totF = C_FriendList.GetNumFriends()
+            local text = string.format("|cff888888Friends |r|cff44ff44%d|r|cff888888/%d|r", onF, totF)
+            if IsInGuild() then
+                local _, _, onG = GetNumGuildMembers()
+                text = text .. INFO_SEP .. string.format("|cff888888Guild |r|cff44ff44%d|r|cff888888 online|r", onG or 0)
+            end
+            return text
+        end)
+        if ok and result then return result end
+        return ""
+
+    elseif key == "att" then
+        return "" -- ATT is now a dedicated bar button; see InitializeInfoBar
+    end
+    return ""
+end
+
+
+UpdateInfoBar = function()
+    if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
+    if not TakeMeHomeDB.infoBarSettings.enabled then
+        infoBar:Hide()
+        return
+    end
+
+    -- Update each module button
+    for _, btn in ipairs(infoBarModuleBtns) do
+        local s = TakeMeHomeDB.infoBarSettings.modules[btn.modKey]
+        if s and s.enabled then
+            local text = GetInfoModuleText(btn.modKey)
+            if text and text ~= "" then
+                btn.lbl:SetText(text)
+                btn:Show()
+            else
+                btn:Hide()
+            end
+        else
+            btn:Hide()
+        end
+    end
+
+    -- Dim window toggle buttons whose windows are hidden
+    for _, btn in ipairs(infoBarToggleButtons) do
+        if btn.dimOverlay then
+            if btn.targetFrame and btn.targetFrame:IsShown() then
+                btn.dimOverlay:Hide()
+            else
+                btn.dimOverlay:Show()
+            end
+        end
+    end
+
+    if userWantsWindowsVisible then
+        infoBar:Show()
+    end
+
+    ReflowInfoBar()
+end
+
+UpdateInfoBarPosition = function()
+    if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
+    local pos = TakeMeHomeDB.infoBarSettings.position or "BOTTOM"
+    local yOff = TakeMeHomeDB.infoBarSettings.yOffset or 0
+    infoBar:ClearAllPoints()
+    if pos == "TOP" then
+        infoBar:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -yOff)
+        infoBar:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, -yOff)
+    else
+        infoBar:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 0, yOff)
+        infoBar:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0, yOff)
+    end
+end
+
+InitializeInfoBar = function()
+    UpdateInfoBarPosition()
+
+    -- Window toggle buttons on the left of the bar
+    local TOGGLE_DEFS = {
+        { key = "main",        name = "Travel",      icon = "Interface\\Icons\\inv_misc_rune_01",              frame = mainFrame,       showFunc = UpdateAllButtons },
+        { key = "mounts",      name = "Mounts",      icon = "Interface\\Icons\\ability_mount_mountainram",     frame = mountsFrame,     showFunc = UpdateMountButtons },
+        { key = "professions", name = "Professions", icon = "Interface\\Icons\\trade_alchemy",                 frame = professionFrame, showFunc = UpdateProfessionButtons },
+        { key = "function",    name = "Function",    icon = "Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up", frame = functionFrame,   showFunc = UpdateFunctionButtons },
+        { key = "missions",    name = "Missions",    icon = "Interface\\Icons\\inv_garrison_resource",         frame = missionFrame,    showFunc = UpdateMissionButtons },
+    }
+
+    local btnSize = 16
+    local btnGap  = 3
+    local lastBtn = nil
+
+    wipe(infoBarToggleButtons)
+    for _, def in ipairs(TOGGLE_DEFS) do
+        local btn = CreateFrame("Button", nil, infoBar)
+        btn:SetSize(btnSize, btnSize)
+        if lastBtn then
+            btn:SetPoint("LEFT", lastBtn, "RIGHT", btnGap, 0)
+        else
+            btn:SetPoint("LEFT", infoBar, "LEFT", 5, 0)
+        end
+
+        local iconTex = btn:CreateTexture(nil, "ARTWORK")
+        iconTex:SetAllPoints()
+        iconTex:SetTexture(def.icon)
+        iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+        -- Dimmed overlay when window is hidden
+        local dimOverlay = btn:CreateTexture(nil, "OVERLAY")
+        dimOverlay:SetAllPoints()
+        dimOverlay:SetColorTexture(0, 0, 0, 0.55)
+        btn.dimOverlay = dimOverlay
+
+        -- Highlight on hover
+        local hoverTex = btn:CreateTexture(nil, "HIGHLIGHT")
+        hoverTex:SetAllPoints()
+        hoverTex:SetColorTexture(1, 1, 1, 0.3)
+
+        btn.targetFrame = def.frame
+        btn.showFunc    = def.showFunc
+        btn.windowName  = def.name
+        btn.windowKey   = def.key
+
+        btn:SetScript("OnClick", function(self)
+            if InCombatLockdown() then return end
+            if self.targetFrame:IsShown() then
+                windowHiddenByBar[self.windowKey] = true
+                if TakeMeHomeDB then TakeMeHomeDB.hiddenWindows[self.windowKey] = true end
+                self.targetFrame:Hide()
+            else
+                windowHiddenByBar[self.windowKey] = nil
+                if TakeMeHomeDB then TakeMeHomeDB.hiddenWindows[self.windowKey] = nil end
+                if self.showFunc then self.showFunc() end
+            end
+        end)
+
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(self.windowName, 1, 1, 1)
+            GameTooltip:AddLine(self.targetFrame:IsShown() and "Click to hide" or "Click to show", 0.7, 0.7, 0.7)
+            GameTooltip:Show()
+        end)
+
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        table.insert(infoBarToggleButtons, btn)
+        lastBtn = btn
+    end
+
+    -- ---- ATT expansion dropdown button ----
+    -- Resolve ATT's slash handler once at init — scan SlashCmdList to find whichever
+    -- key has "/att" registered as one of its SLASH_<KEY>N aliases.
+    local attSlashHandler = nil
+    for handlerKey, handlerFunc in pairs(SlashCmdList) do
+        local i = 1
+        while true do
+            local alias = _G["SLASH_" .. handlerKey .. i]
+            if not alias then break end
+            if alias:lower() == "/att" then
+                attSlashHandler = handlerFunc
+                break
+            end
+            i = i + 1
+        end
+        if attSlashHandler then break end
+    end
+
+    local attAnchor = lastBtn  -- track anchor for left-text offset
+    if C_AddOns.IsAddOnLoaded("AllTheThings")
+    and TakeMeHomeDB.infoBarSettings
+    and TakeMeHomeDB.infoBarSettings.attButton ~= false then
+
+        -- Build expansion dropdown frame
+        local rowH = 20
+        local sepH = 6   -- height of separator lines
+        local ddWidth = 170
+        -- Count separators to size the frame correctly
+        local separatorCount = 0
+        for _, e in ipairs(ATT_EXPANSIONS) do if e.separator then separatorCount = separatorCount + 1 end end
+        local attDD = CreateFrame("Frame", "TakeMeHomeATTDropdown", UIParent, "BackdropTemplate")
+        attDD:SetSize(ddWidth, #ATT_EXPANSIONS * rowH + separatorCount * sepH + 8)
+        attDD:SetFrameStrata("TOOLTIP")
+        attDD:SetBackdrop({
+            bgFile   = "Interface\\BUTTONS\\WHITE8X8",
+            edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+            edgeSize = 1,
+            insets   = { left = 1, right = 1, top = 1, bottom = 1 }
+        })
+        attDD:SetBackdropColor(0.07, 0.07, 0.10, 0.97)
+        attDD:SetBackdropBorderColor(0.4, 0.3, 0.6, 1)
+        attDD:EnableMouse(true)
+        attDD:Hide()
+
+        local currentY = 4
+        for i, exp in ipairs(ATT_EXPANSIONS) do
+            local row = CreateFrame("Button", nil, attDD)
+            row:SetSize(ddWidth - 8, rowH - 2)
+            row:SetPoint("TOPLEFT", attDD, "TOPLEFT", 4, -currentY)
+            currentY = currentY + rowH
+
+            local rowBg = row:CreateTexture(nil, "BACKGROUND")
+            rowBg:SetAllPoints()
+            rowBg:SetColorTexture(0.15, 0.10, 0.25, 0)
+            row.bg = rowBg
+
+            local rowHL = row:CreateTexture(nil, "HIGHLIGHT")
+            rowHL:SetAllPoints()
+            rowHL:SetColorTexture(0.4, 0.2, 0.7, 0.4)
+
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            label:SetPoint("LEFT", row, "LEFT", 4, 0)
+            label:SetText(exp.name)
+            label:SetJustifyH("LEFT")
+
+            row.expID   = exp.id
+            row.expName = exp.name
+            row.expCmd  = exp.cmd
+
+            row:SetScript("OnClick", function(self)
+                attDD:Hide()
+                print("|cff00ff00TakeMeHome|r: ATT click — cmd=|cff00ffff" .. tostring(self.expCmd) .. "|r  handler=" .. tostring(attSlashHandler))
+                if attSlashHandler then
+                    pcall(attSlashHandler, self.expCmd)
+                end
+            end)
+
+            row:SetScript("OnEnter", function(self)
+                self.bg:SetColorTexture(0.15, 0.10, 0.25, 0.6)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(self.expName, 1, 1, 1)
+                GameTooltip:AddLine("Open All The Things", 0.7, 0.7, 0.7)
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function(self)
+                self.bg:SetColorTexture(0.15, 0.10, 0.25, 0)
+                GameTooltip:Hide()
+                C_Timer.After(0.15, function()
+                    if not attDD:IsMouseOver() then attDD:Hide() end
+                end)
+            end)
+
+            -- Draw a thin separator line after this entry if flagged
+            if exp.separator then
+                local sep = attDD:CreateTexture(nil, "ARTWORK")
+                sep:SetHeight(1)
+                sep:SetPoint("TOPLEFT",  attDD, "TOPLEFT",  6,  -currentY - 1)
+                sep:SetPoint("TOPRIGHT", attDD, "TOPRIGHT", -6, -currentY - 1)
+                sep:SetColorTexture(0.4, 0.3, 0.6, 0.6)
+                currentY = currentY + sepH
+            end
+        end
+
+        attDD:SetScript("OnLeave", function(self)
+            C_Timer.After(0.15, function()
+                if not self:IsMouseOver() then self:Hide() end
+            end)
+        end)
+
+        -- ATT bar button — anchored to the right edge of the Coords text
+        local attBarBtn = CreateFrame("Button", nil, infoBar)
+        attBarBtn:SetSize(30, btnSize)
+        attBarBtn:SetPoint("LEFT", infoBarLeft, "RIGHT", 8, 0)
+
+        local attBtnTex = attBarBtn:CreateTexture(nil, "BACKGROUND")
+        attBtnTex:SetAllPoints()
+        attBtnTex:SetColorTexture(0.3, 0.1, 0.5, 0)
+        attBarBtn.bg = attBtnTex
+
+        local attBtnHL = attBarBtn:CreateTexture(nil, "HIGHLIGHT")
+        attBtnHL:SetAllPoints()
+        attBtnHL:SetColorTexture(0.4, 0.2, 0.7, 0.35)
+
+        local attBtnLabel = attBarBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        attBtnLabel:SetPoint("CENTER", attBarBtn, "CENTER", 0, 0)
+        attBtnLabel:SetText("|cffcc99ffATT|r")
+
+        local function PositionAndShowDD()
+            attDD:ClearAllPoints()
+            local pos = TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.position or "BOTTOM"
+            if pos == "TOP" then
+                attDD:SetPoint("TOPLEFT", attBarBtn, "BOTTOMLEFT", 0, -2)
+            else
+                attDD:SetPoint("BOTTOMLEFT", attBarBtn, "TOPLEFT", 0, 2)
+            end
+            attDD:Show()
+        end
+
+        attBarBtn:SetScript("OnEnter", function(self)
+            self.bg:SetColorTexture(0.3, 0.1, 0.5, 0.5)
+            PositionAndShowDD()
+        end)
+        attBarBtn:SetScript("OnLeave", function(self)
+            self.bg:SetColorTexture(0.3, 0.1, 0.5, 0)
+            C_Timer.After(0.15, function()
+                if not attDD:IsMouseOver() then attDD:Hide() end
+            end)
+        end)
+
+        attAnchor = attBarBtn
+    end
+
+    -- Settings cog button (far right)
+    infoBarCogButton = CreateFrame("Button", nil, infoBar)
+    infoBarCogButton:SetSize(20, 20)
+    infoBarCogButton:SetPoint("RIGHT", infoBar, "RIGHT", -4, 0)
+
+    local cogIcon = infoBarCogButton:CreateTexture(nil, "ARTWORK")
+    cogIcon:SetAllPoints()
+    cogIcon:SetTexture("Interface\\Icons\\Trade_Engineering")
+    cogIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local cogHL = infoBarCogButton:CreateTexture(nil, "HIGHLIGHT")
+    cogHL:SetAllPoints()
+    cogHL:SetColorTexture(1, 1, 1, 0.25)
+
+    infoBarCogButton:SetScript("OnClick", function()
+        CreateConfigPanel()
+    end)
+    infoBarCogButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("TakeMeHome Settings", 1, 1, 1)
+        GameTooltip:AddLine("Click to open settings", 0.6, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    infoBarCogButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Create individual module buttons for each INFO_BAR_MODULE
+    wipe(infoBarModuleBtns)
+    -- Sort by order
+    local sortedMods = {}
+    for _, mod in ipairs(INFO_BAR_MODULES) do table.insert(sortedMods, mod) end
+    table.sort(sortedMods, function(a, b) return a.order < b.order end)
+    for _, mod in ipairs(sortedMods) do
+        local btn = CreateInfoModuleBtn(mod.key, mod.section)
+        table.insert(infoBarModuleBtns, btn)
+    end
+
+    -- Left text starts after toggle buttons (+ ATT button gap if present)
+    infoBarLeftOffset = #TOGGLE_DEFS * (btnSize + btnGap) - btnGap + 12
+    if attAnchor and attAnchor ~= lastBtn then
+        infoBarLeftOffset = infoBarLeftOffset + btnGap * 3 + 30 + 4
+    end
+
+    UpdateInfoBar()
 end
 
 -- ============================================
@@ -3579,14 +5100,16 @@ minimapButton:SetScript("OnClick", function(self, button)
             mountsFrame:Hide()
             functionFrame:Hide()
             missionFrame:Hide()
+            infoBar:Hide()
             userWantsWindowsVisible = false
         else
             userWantsWindowsVisible = true
-            mainFrame:Show()
-            professionFrame:Show()
-            mountsFrame:Show()
-            functionFrame:Show()
-            missionFrame:Show()
+            if not windowHiddenByBar["main"]        then mainFrame:Show()       end
+            if not windowHiddenByBar["professions"] then professionFrame:Show() end
+            if not windowHiddenByBar["mounts"]      then mountsFrame:Show()     end
+            if not windowHiddenByBar["function"]    then functionFrame:Show()   end
+            if not windowHiddenByBar["missions"]    then missionFrame:Show()    end
+            UpdateInfoBar()
         end
     elseif button == "RightButton" then
         -- Open settings
@@ -3658,13 +5181,17 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         print("|cff00ff00TakeMeHome|r: All positions reset to center.")
     elseif cmd == "toggle" or cmd == "" then
         if mainFrame:IsShown() then
+            windowHiddenByBar["main"] = true
             mainFrame:Hide()
         else
-            mainFrame:Show()
+            windowHiddenByBar["main"] = nil
+            UpdateAllButtons()
         end
     elseif cmd == "show" then
-        mainFrame:Show()
+        windowHiddenByBar["main"] = nil
+        UpdateAllButtons()
     elseif cmd == "hide" then
+        windowHiddenByBar["main"] = true
         mainFrame:Hide()
     elseif cmd == "prof" or cmd == "professions" then
         if professionFrame:IsShown() then
@@ -3696,6 +5223,110 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         functionFrame:ClearAllPoints()
         functionFrame:SetPoint("CENTER", 0, -100)
         print("|cff00ff00TakeMeHome|r: Function position reset.")
+    elseif cmd == "attdebug" then
+        if not C_AddOns.IsAddOnLoaded("AllTheThings") then
+            print("|cff00ff00TakeMeHome|r: AllTheThings is not loaded.")
+        else
+            print("|cff00ff00TakeMeHome|r: |cff00ffffATT debug v2|r")
+            -- Scan ALL globals starting with "AllTheThings"
+            print("  |cff00ffffAll ATT globals in _G:|r")
+            for gk, gv in pairs(_G) do
+                if type(gk) == "string" and gk:find("^AllTheThings") then
+                    print("  |cffffcc00" .. gk .. "|r (" .. type(gv) .. ")")
+                    if type(gv) == "table" then
+                        for k, v in pairs(gv) do
+                            if type(v) ~= "function" then
+                                print("    ." .. tostring(k) .. " (" .. type(v) .. ") = " .. tostring(v):sub(1, 60))
+                                if type(v) == "table" then
+                                    local c = 0
+                                    for k2, v2 in pairs(v) do
+                                        c = c + 1
+                                        if c <= 4 then
+                                            print("      ." .. tostring(k2) .. " (" .. type(v2) .. ") = " .. tostring(v2):sub(1, 50))
+                                        end
+                                    end
+                                    if c > 4 then print("      ...+" .. (c-4) .. " more") end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            -- LDB check
+            local LibDataBroker = LibStub and LibStub("LibDataBroker-1.1", true)
+            if LibDataBroker then
+                local n = 0
+                for name, obj in LibDataBroker:DataObjectIterator() do n = n + 1 end
+                print("  LDB registered objects: " .. n)
+                for name, obj in LibDataBroker:DataObjectIterator() do
+                    if name:lower():find("things") or name:lower():find("^att") then
+                        print("  LDB match: |cff00ffff" .. name .. "|r text=" .. tostring(obj.text))
+                    end
+                end
+            else
+                print("  LibDataBroker: not available")
+            end
+        end
+    elseif cmd == "attdebug2" then
+        if not AllTheThings then
+            print("|cff00ff00TakeMeHome|r: AllTheThings global is nil.")
+        else
+            print("|cff00ff00TakeMeHome|r: |cff00ffffATT deep probe v2|r")
+            -- LDB full field dump — run this AFTER being in game a few minutes
+            local LibDataBroker = LibStub and LibStub("LibDataBroker-1.1", true)
+            if LibDataBroker then
+                -- Find ATT's LDB object by scanning all registered objects
+                local attObj, attName = nil, nil
+                for name, obj in LibDataBroker:DataObjectIterator() do
+                    if name:lower():find("things") or name:lower():find("^att$") then
+                        attObj, attName = obj, name
+                    end
+                end
+                if attObj then
+                    print("  |cff00ffffLDB '" .. attName .. "' ALL fields:|r")
+                    for k, v in pairs(attObj) do
+                        print("    ." .. tostring(k) .. " (" .. type(v) .. ") = " .. tostring(v):sub(1, 80))
+                    end
+                else
+                    print("  |cffff4444No ATT LDB object found yet — wait for ATT to finish loading|r")
+                end
+            else
+                print("  LibDataBroker not available")
+            end
+            -- UniqueCounter — print actual numeric values
+            print("  |cff00ffffUniqueCounter numeric probe:|r")
+            local uc = AllTheThings.UniqueCounter
+            local propNames = {
+                "Obtained","obtained","Collected","collected","Count","count",
+                "Total","total","Max","max","Progress","progress",
+                "progress_total","obtained_total","TotalCollected","TotalObtained",
+            }
+            for _, k in ipairs(propNames) do
+                local ok, v = pcall(function() return uc[k] end)
+                if ok and v ~= nil then
+                    print("    .UniqueCounter." .. k .. " = " .. tostring(v))
+                end
+            end
+            -- AccountUniqueSources count via # and pairs
+            local uc2 = AllTheThings.AccountUniqueSources
+            local pairsCount, hashCount = 0, 0
+            pcall(function() hashCount = #uc2 end)
+            for _ in pairs(uc2) do pairsCount = pairsCount + 1 end
+            print("  AccountUniqueSources  # = " .. hashCount .. "  pairs = " .. pairsCount)
+            -- Try AllTheThings root group fields (progress/total live on the root category)
+            print("  |cff00ffffAllTheThings root group fields:|r")
+            local rootProps = {
+                "progress","total","filtered","filtersCount",
+                "Progress","Total","Filtered","count","Count",
+                "TotalProgress","TotalObtained","TotalCollected",
+            }
+            for _, k in ipairs(rootProps) do
+                local ok, v = pcall(function() return AllTheThings[k] end)
+                if ok and v ~= nil then
+                    print("    .AllTheThings." .. k .. " (" .. type(v) .. ") = " .. tostring(v):sub(1,80))
+                end
+            end
+        end
     elseif cmd == "config" or cmd == "settings" or cmd == "options" then
         CreateConfigPanel()
     else

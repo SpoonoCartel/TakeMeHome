@@ -1,5 +1,20 @@
 # TakeMeHome Changelog
 
+## [1.8.0] - 2026-06-03
+### Added
+- **Info Bar**: Persistent full-width bar (docked top or bottom of screen) showing live game data
+  - **Zone / Subzone**: Current location name with zone context
+  - **Coordinates**: Player X, Y position in the current zone
+  - **Gold**: Formatted gold display with g/s/c colour-coding (supports millions)
+  - **Bags**: Free/total bag slot count, colour-coded when low
+  - **Durability**: Lowest equipped item durability %, colour-coded (green/yellow/red)
+  - **FPS**: Live frames-per-second, colour-coded by performance
+  - **Latency**: Home/World latency in milliseconds, colour-coded
+  - **Server Time**: Current server clock
+  - **XP**: Experience progress percentage (hidden by default, useful for levelling alts)
+- Info bar integrates with minimap toggle (left-click to show/hide all windows including bar)
+- **Bar tab** in Settings panel: enable/disable bar, switch between Top/Bottom position, toggle individual modules
+
 ## [1.7.0] - 2025-03-01
 ### Added
 - Personal Key to the Arcantina (item ID 253629) to the top row of the Hearthstone window
