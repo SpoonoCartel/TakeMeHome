@@ -1,5 +1,13 @@
 # TakeMeHome Changelog
 
+## [2.2.0] - 2026-06-04
+### Added
+- **Currency module** — shows watched currency with count/cap, colour-coded red when capped; click opens Currency tab
+- **Keystone module** — shows owned Mythic+ key level and dungeon name, colour-coded by level; click opens Challenges
+
+### Fixed
+- Config panel crashing on open when Missions section built — `MISSION_TABLE_DEFINITIONS` was declared after `CreateConfigPanel`, treated as nil global; fixed with forward declaration
+
 ## [2.1.0] - 2026-06-04
 ### Added
 - **Notification dots** on bottom bar (left of cog): yellow = unread mail, green = LFG queue active, blue = pending calendar invite; each clickable to open the relevant UI

@@ -65,6 +65,8 @@ local INFO_BAR_MODULES = {
 
     { key = "hsCooldown",  name = "HS Cooldown",  section = "left",   order = 10 },
     { key = "spec",        name = "Specialization", section = "left", order = 16 },
+    { key = "currency",    name = "Currency",     section = "center", order = 17 },
+    { key = "keystone",    name = "Keystone",     section = "left",   order = 18 },
     { key = "fps",         name = "FPS",          section = "right",  order = 11 },
     { key = "latency",     name = "Latency",      section = "right",  order = 12 },
     { key = "timeLocal",   name = "Local Time",   section = "right",  order = 13 },
@@ -185,6 +187,8 @@ local defaults = {
             sessionGold = { enabled = true,  order = 9,  bar = "bottom" },
             hsCooldown =  { enabled = true,  order = 10, bar = "bottom" },
             spec =        { enabled = true,  order = 16, bar = "bottom" },
+            currency =    { enabled = true,  order = 17, bar = "bottom" },
+            keystone =    { enabled = true,  order = 18, bar = "bottom" },
             fps =         { enabled = true,  order = 11, bar = "bottom" },
             latency =     { enabled = true,  order = 12, bar = "bottom" },
             timeLocal =   { enabled = true,  order = 13, bar = "bottom" },
@@ -249,6 +253,8 @@ local INFO_MODULE_ACTIONS = {
     rep         = function() pcall(function() ToggleCharacter("ReputationFrame") end) end,
     sessionGold = function() pcall(OpenAllBags) end,
     hsCooldown  = function() if mainFrame:IsShown() then mainFrame:Hide() else mainFrame:Show() end end,
+    currency    = function() pcall(function() ToggleCharacter("TokenFrame") end) end,
+    keystone    = function() pcall(function() PVEFrame_ToggleFrame("ChallengesFrame") end) end,
     spec        = function()
         pcall(function()
             if PlayerSpellsFrame and PlayerSpellsFrame:IsShown() then
@@ -297,6 +303,8 @@ local INFO_MODULE_TIPS = {
     rep         = "Click to open Reputations",
     sessionGold = "Click to open Bags",
     hsCooldown  = "Click to toggle Travel window",
+    currency    = "Watched currency  |cff888888Click to open Currency tab|r",
+    keystone    = "Your Mythic+ keystone  |cff888888Click to open Challenges|r",
     spec        = "Click to open Talents  |cff888888Right-click to switch spec|r",
 }
 
@@ -1971,6 +1979,8 @@ local function MakeUpDownRow(parent, yOff, label, index, totalCount, onUp, onDow
     return row
 end
 
+local MISSION_TABLE_DEFINITIONS  -- forward declaration; assigned below near mission window code
+
 local function CreateConfigPanel()
     if configFrame then configFrame:Show() return end
 
@@ -3500,7 +3510,7 @@ local function IsMissionButtonEnabled(key)
 end
 
 -- Mission table definitions with expansion-specific icons
-local MISSION_TABLE_DEFINITIONS = {
+MISSION_TABLE_DEFINITIONS = {
     {
         key = "wod",
         name = "Warlords of Draenor",
@@ -3984,6 +3994,29 @@ local function GetInfoModuleText(key)
             end
         end
         return "|cff888888HS |r|cff44ff44Ready|r"
+
+    elseif key == "currency" then
+        local ok, info = pcall(C_CurrencyInfo.GetWatchedCurrencyInfo)
+        if ok and info and info.name then
+            local count = info.quantity or 0
+            local cap   = info.maxQuantity or 0
+            local color = (cap > 0 and count >= cap) and "|cffff4444" or "|cffffffff"
+            local capStr = cap > 0 and ("|cff888888/" .. cap .. "|r") or ""
+            return "|cff888888" .. info.name:sub(1, 14) .. " |r" .. color .. count .. "|r" .. capStr
+        end
+        return ""
+
+    elseif key == "keystone" then
+        local ok, level = pcall(C_MythicPlus.GetOwnedKeystoneLevel)
+        if not ok or not level then return "" end
+        local mapOk, mapID = pcall(C_MythicPlus.GetOwnedKeystoneMapID)
+        local name = ""
+        if mapOk and mapID then
+            local mapOk2, mapInfo = pcall(C_Map.GetMapInfo, mapID)
+            if mapOk2 and mapInfo then name = " " .. mapInfo.name:sub(1,12) end
+        end
+        local color = level >= 15 and "|cffff8844" or level >= 10 and "|cffffff44" or "|cff44ff44"
+        return "|cff888888Key |r" .. color .. "+" .. level .. "|r" .. "|cffaaaaaa" .. name .. "|r"
 
     elseif key == "att" then
         return "" -- ATT is now a dedicated bar button; see InitializeInfoBar
