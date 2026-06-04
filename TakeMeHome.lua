@@ -3691,7 +3691,9 @@ infoBarTop:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.8)
 local infoBarModuleBtns  = {}   -- bottom bar
 local infoBarTopBtns     = {}   -- top bar
 local infoBarLeftOffset  = 8    -- updated after toggle+ATT buttons on bottom bar
+local infoBarRightOffset = 28   -- updated after cog + notification dots on bottom bar
 local infoBarCogButton   = nil
+local infoBarNotifDots   = {}   -- { mail, lfg, calendar } dot frames
 
 local INFO_SEP = " |cff2a2a40||r "
 
@@ -3795,7 +3797,7 @@ local function ReflowBar(barFrame, btns, leftOffset, cogOffset)
 end
 
 local function ReflowInfoBar()
-    ReflowBar(infoBar,    infoBarModuleBtns, infoBarLeftOffset, 28)
+    ReflowBar(infoBar,    infoBarModuleBtns, infoBarLeftOffset, infoBarRightOffset)
     ReflowBar(infoBarTop, infoBarTopBtns,    8,                 28)
 end
 
@@ -4026,6 +4028,9 @@ UpdateInfoBar = function()
             if btn.dimOverlay then
                 btn.dimOverlay:SetShown(not (btn.targetFrame and btn.targetFrame:IsShown()))
             end
+        end
+        for _, dot in ipairs(infoBarNotifDots) do
+            dot:SetShown(dot.checkFn and dot.checkFn() or false)
         end
         if userWantsWindowsVisible then infoBar:Show() end
     else
@@ -4370,6 +4375,73 @@ InitializeInfoBar = function()
 
         attAnchor = attBarBtn
     end
+
+    -- Notification dots (mail, LFG queue, calendar) — left of cog
+    wipe(infoBarNotifDots)
+    local dotSize = 10
+    local dotGap  = 4
+    local dotDefs = {
+        {
+            key  = "mail",
+            r=1, g=0.8, b=0.1,
+            check = function() return HasNewMail() end,
+            tip   = "Unread Mail",
+            click = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
+        },
+        {
+            key  = "lfg",
+            r=0.1, g=1, b=0.3,
+            check = function()
+                local ok, mode = pcall(GetLFGMode, LE_LFG_CATEGORY_LFD)
+                return ok and mode ~= nil and mode ~= "none"
+            end,
+            tip   = "In LFG Queue",
+            click = function() pcall(PVEFrame_ToggleFrame) end,
+        },
+        {
+            key  = "calendar",
+            r=0.3, g=0.6, b=1,
+            check = function()
+                local ok, n = pcall(function() return C_Calendar.GetNumPendingInvites() end)
+                return ok and n and n > 0
+            end,
+            tip   = "Pending Calendar Invite",
+            click = function() pcall(ToggleCalendar) end,
+        },
+    }
+
+    local rightX = -28  -- start left of cog
+    for _, def in ipairs(dotDefs) do
+        local dot = CreateFrame("Button", nil, infoBar)
+        dot:SetSize(dotSize, dotSize)
+        dot:SetPoint("RIGHT", infoBar, "RIGHT", rightX - dotSize, 0)
+        rightX = rightX - dotSize - dotGap
+
+        local tex = dot:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        tex:SetTexture("Interface\\BUTTONS\\WHITE8X8")
+        tex:SetVertexColor(def.r, def.g, def.b, 1)
+        dot.tex = tex
+
+        local hl = dot:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.4)
+
+        dot.checkFn = def.check
+        dot.tip     = def.tip
+        dot:SetScript("OnClick", def.click)
+        dot:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(self.tip, 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        dot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        dot:Hide()
+        table.insert(infoBarNotifDots, dot)
+    end
+
+    -- Reserve right space: cog (24) + each dot (dotSize + dotGap)
+    infoBarRightOffset = 28 + #dotDefs * (dotSize + dotGap)
 
     -- Settings cog button (far right)
     infoBarCogButton = CreateFrame("Button", nil, infoBar)

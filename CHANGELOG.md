@@ -1,5 +1,9 @@
 # TakeMeHome Changelog
 
+## [2.1.0] - 2026-06-04
+### Added
+- **Notification dots** on bottom bar (left of cog): yellow = unread mail, green = LFG queue active, blue = pending calendar invite; each clickable to open the relevant UI
+
 ## [2.0.0] - 2026-06-04
 ### Added
 - **Dual bar** — independent top and bottom bars, each with their own enable toggle
