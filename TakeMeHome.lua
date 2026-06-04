@@ -3702,6 +3702,8 @@ local infoBarModuleBtns  = {}   -- bottom bar
 local infoBarTopBtns     = {}   -- top bar
 local infoBarLeftOffset  = 8    -- updated after toggle+ATT buttons on bottom bar
 local infoBarRightOffset = 28   -- updated after cog + notification dots on bottom bar
+local barHsBtn           = nil  -- quick-cast hearthstone button
+local barMountBtn        = nil  -- quick-cast mount button
 local infoBarCogButton   = nil
 local infoBarNotifDots   = {}   -- { mail, lfg, calendar } dot frames
 
@@ -4064,6 +4066,39 @@ UpdateInfoBar = function()
         end
         for _, dot in ipairs(infoBarNotifDots) do
             dot:SetShown(dot.checkFn and dot.checkFn() or false)
+        end
+        -- Quick-cast: smart hearthstone
+        if barHsBtn then
+            local best, bestRem = nil, math.huge
+            for _, item in ipairs(TRAVEL_ITEMS) do
+                local ok, start, dur = pcall(GetItemCooldown, item.itemID)
+                local rem = (ok and dur and dur > 0) and math.max(0, start + dur - GetTime()) or 0
+                if rem < bestRem then bestRem = rem; best = item end
+            end
+            if best and not InCombatLockdown() then
+                barHsBtn:SetAttribute("item", "item:" .. best.itemID)
+                local icon = GetItemIcon(best.itemID)
+                if icon then barHsBtn.icon:SetTexture(icon) end
+                barHsBtn.dim:SetShown(bestRem > 0)
+                if bestRem > 0 then
+                    local ok, s, d = pcall(GetItemCooldown, best.itemID)
+                    if ok and d then barHsBtn.cooldown:SetCooldown(s, d) end
+                else
+                    barHsBtn.cooldown:Clear()
+                end
+                local remStr = bestRem > 0 and string.format(" (|cffff8844%dm %02ds|r)", math.floor(bestRem/60), math.floor(bestRem%60)) or " |cff44ff44Ready|r"
+                barHsBtn._tip  = best.name
+                barHsBtn._tip2 = "Click to use" .. remStr
+            end
+        end
+        -- Quick-cast: favourite mount (random from journal favourites)
+        if barMountBtn then
+            barMountBtn:SetAttribute("type", "macro")
+            barMountBtn:SetAttribute("macrotext", "/run C_MountJournal.SummonByID(0)")
+            barMountBtn.icon:SetTexture("Interface\\Icons\\ability_mount_mountainram")
+            barMountBtn._tip  = "Summon Random Favourite Mount"
+            barMountBtn._tip2 = "Click to summon"
+            barMountBtn:Show()
         end
         if userWantsWindowsVisible then infoBar:Show() end
     else
@@ -4523,6 +4558,52 @@ InitializeInfoBar = function()
     if attAnchor and attAnchor ~= lastBtn then
         infoBarLeftOffset = infoBarLeftOffset + btnGap * 3 + 30 + 4
     end
+
+    -- Quick-cast buttons: smart hearthstone + smart mount
+    local qcSize = btnSize  -- match toggle button size (16)
+    local qcGap  = 4
+    local qcAnchor = attAnchor  -- place after ATT button (or last toggle if no ATT)
+
+    local function MakeQuickCastBtn(anchor, offsetX)
+        local btn = CreateFrame("Button", nil, infoBar, "SecureActionButtonTemplate")
+        btn:SetSize(qcSize, qcSize)
+        btn:SetPoint("LEFT", anchor, "RIGHT", offsetX, 0)
+        btn:RegisterForClicks("AnyDown")
+        local ic = btn:CreateTexture(nil, "ARTWORK")
+        ic:SetAllPoints()
+        ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        btn.icon = ic
+        local cd = CreateFrame("Cooldown", nil, btn, "CooldownFrameTemplate")
+        cd:SetAllPoints()
+        cd:SetDrawEdge(false)
+        btn.cooldown = cd
+        local dim = btn:CreateTexture(nil, "OVERLAY")
+        dim:SetAllPoints()
+        dim:SetColorTexture(0, 0, 0, 0.55)
+        dim:Hide()
+        btn.dim = dim
+        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.3)
+        btn:SetScript("OnEnter", function(self)
+            if self._tip then
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:SetText(self._tip, 1, 1, 1)
+                if self._tip2 then GameTooltip:AddLine(self._tip2, 0.6, 0.6, 0.6) end
+                GameTooltip:Show()
+            end
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        return btn
+    end
+
+    barHsBtn    = MakeQuickCastBtn(qcAnchor, qcGap * 2)
+    barMountBtn = MakeQuickCastBtn(barHsBtn, qcGap)
+    barHsBtn:SetAttribute("type", "item")
+    barMountBtn:SetAttribute("type", "spell")
+
+    -- account for quick-cast buttons in left offset
+    infoBarLeftOffset = infoBarLeftOffset + 2 * (qcSize + qcGap) + qcGap
 
     -- Top bar cog button
     local topCog = CreateFrame("Button", nil, infoBarTop)

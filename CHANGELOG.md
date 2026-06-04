@@ -1,5 +1,11 @@
 # TakeMeHome Changelog
 
+## [2.3.0] - 2026-06-04
+### Added
+- **Quick-cast bar buttons** — two icon buttons on the bottom bar after the ATT button:
+  - Hearthstone: uses best available hearthstone (shortest cooldown); shows cooldown swipe; tooltip shows name and remaining time
+  - Mount: summons a random favourite mount from the journal (`C_MountJournal.SummonByID(0)`)
+
 ## [2.2.0] - 2026-06-04
 ### Added
 - **Currency module** — shows watched currency with count/cap, colour-coded red when capped; click opens Currency tab
