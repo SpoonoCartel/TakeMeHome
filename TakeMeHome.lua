@@ -65,8 +65,14 @@ local INFO_BAR_MODULES = {
 
     { key = "hsCooldown",  name = "HS Cooldown",  section = "left",   order = 10 },
     { key = "spec",        name = "Specialization", section = "left", order = 16 },
-    { key = "currency",    name = "Currency",     section = "center", order = 17 },
-    { key = "keystone",    name = "Keystone",     section = "left",   order = 18 },
+    { key = "currency",     name = "Currency",      section = "center", order = 17 },
+    { key = "keystone",     name = "Keystone",      section = "left",   order = 18 },
+    { key = "weeklyReset",  name = "Weekly Reset",  section = "right",  order = 19 },
+    { key = "dailyReset",   name = "Daily Reset",   section = "right",  order = 20 },
+    { key = "dailyGold",    name = "Daily Gold",    section = "center", order = 21 },
+    { key = "warbandGold",  name = "Warband Gold",  section = "center", order = 22 },
+    { key = "todoCount",    name = "Todo Count",    section = "center", order = 23 },
+    { key = "playtime",     name = "Played Time",   section = "center", order = 24 },
     { key = "fps",         name = "FPS",          section = "right",  order = 11 },
     { key = "latency",     name = "Latency",      section = "right",  order = 12 },
     { key = "timeLocal",   name = "Local Time",   section = "right",  order = 13 },
@@ -173,27 +179,35 @@ local defaults = {
     infoBarSettings = {
         enabled    = true,   -- bottom bar
         topEnabled = false,  -- top bar
-        yOffset    = 0,
+        yOffset    = 0,      -- bottom bar Y offset
+        topYOffset = 0,      -- top bar Y offset
         attButton  = true,
+        minimapCollector = false, -- opt-in: sweep other addons' minimap buttons into a bar dropdown
         modules = {
-            zone =        { enabled = true,  order = 1,  bar = "bottom" },
-            coords =      { enabled = true,  order = 2,  bar = "bottom" },
-            ilvl =        { enabled = true,  order = 3,  bar = "bottom" },
-            rep =         { enabled = false, order = 4,  bar = "bottom" },
-            gold =        { enabled = true,  order = 5,  bar = "bottom" },
-            bags =        { enabled = true,  order = 6,  bar = "bottom" },
-            durability =  { enabled = true,  order = 7,  bar = "bottom" },
-            xp =          { enabled = false, order = 8,  bar = "bottom" },
-            sessionGold = { enabled = true,  order = 9,  bar = "bottom" },
-            hsCooldown =  { enabled = true,  order = 10, bar = "bottom" },
-            spec =        { enabled = true,  order = 16, bar = "bottom" },
-            currency =    { enabled = true,  order = 17, bar = "bottom" },
-            keystone =    { enabled = true,  order = 18, bar = "bottom" },
-            fps =         { enabled = true,  order = 11, bar = "bottom" },
-            latency =     { enabled = true,  order = 12, bar = "bottom" },
-            timeLocal =   { enabled = true,  order = 13, bar = "bottom" },
-            time =        { enabled = true,  order = 14, bar = "bottom" },
-            friends =     { enabled = false, order = 15, bar = "bottom" },
+            zone =        { enabled = true,  order = 1,  bar = "bottom", section = "left"   },
+            coords =      { enabled = true,  order = 2,  bar = "bottom", section = "left"   },
+            ilvl =        { enabled = true,  order = 3,  bar = "bottom", section = "left"   },
+            rep =         { enabled = false, order = 4,  bar = "bottom", section = "left"   },
+            gold =        { enabled = true,  order = 5,  bar = "bottom", section = "center" },
+            bags =        { enabled = true,  order = 6,  bar = "bottom", section = "center" },
+            durability =  { enabled = true,  order = 7,  bar = "bottom", section = "center" },
+            xp =          { enabled = false, order = 8,  bar = "bottom", section = "center" },
+            sessionGold = { enabled = true,  order = 9,  bar = "bottom", section = "center" },
+            hsCooldown =  { enabled = true,  order = 10, bar = "bottom", section = "left"   },
+            spec =        { enabled = true,  order = 16, bar = "bottom", section = "left"   },
+            currency =    { enabled = true,  order = 17, bar = "bottom", section = "center" },
+            keystone =    { enabled = true,  order = 18, bar = "bottom", section = "left"   },
+            weeklyReset = { enabled = true,  order = 19, bar = "bottom", section = "right"  },
+            dailyReset =  { enabled = false, order = 20, bar = "bottom", section = "right"  },
+            dailyGold =   { enabled = false, order = 21, bar = "bottom", section = "center" },
+            warbandGold = { enabled = false, order = 22, bar = "bottom", section = "center" },
+            todoCount   = { enabled = false, order = 23, bar = "bottom", section = "center" },
+            playtime    = { enabled = false, order = 24, bar = "bottom", section = "center" },
+            fps =         { enabled = true,  order = 11, bar = "bottom", section = "right"  },
+            latency =     { enabled = true,  order = 12, bar = "bottom", section = "right"  },
+            timeLocal =   { enabled = true,  order = 13, bar = "bottom", section = "right"  },
+            time =        { enabled = true,  order = 14, bar = "bottom", section = "right"  },
+            friends =     { enabled = false, order = 15, bar = "bottom", section = "right"  },
         }
     },
 }
@@ -226,6 +240,7 @@ local UpdateMainDragBanner, UpdateProfDragBanner, UpdateMountsDragBanner, Update
 local InitializeProfessions, InitializeMounts, InitializeFunction, InitializeMissions
 local UpdateProfessionButtons, UpdateMountButtons, UpdateFunctionButtons, UpdateMissionButtons
 local UpdateInfoBar, UpdateInfoBarPosition, InitializeInfoBar
+local todoFrame, BuildTodoContent
 
 -- Track if user wants windows visible (used by minimap toggle)
 local userWantsWindowsVisible = true
@@ -239,6 +254,35 @@ local sessionGoldStart = nil
 -- Click actions and tooltips for info bar modules
 -- Last coordinate string (updated each tick, used by right-click copy)
 local lastCoordsString = ""
+
+local function GetCharKey()
+    return (GetRealmName() or "Unknown") .. "-" .. (UnitName("player") or "Unknown")
+end
+
+-- Playtime tracking — single table (not several top-level locals) to stay under
+-- the 200 main-chunk local limit. Baseline is captured whenever TIME_PLAYED_MSG
+-- fires (login + periodic refresh); live totals are extrapolated from it.
+local Playtime = {}
+
+function Playtime.GetLive()
+    if not Playtime.baselineTotal then return nil, nil end
+    local elapsed = GetTime() - Playtime.baselineTime
+    return Playtime.baselineTotal + elapsed, Playtime.baselineLevel + elapsed
+end
+
+function Playtime.Format(seconds)
+    if not seconds or seconds < 0 then return "" end
+    local d = math.floor(seconds / 86400)
+    local h = math.floor((seconds % 86400) / 3600)
+    local m = math.floor((seconds % 3600) / 60)
+    if d > 0 then
+        return string.format("%dd %dh", d, h)
+    elseif h > 0 then
+        return string.format("%dh %dm", h, m)
+    else
+        return string.format("%dm", m)
+    end
+end
 
 -- Rich tooltip builders per module key — return nothing, but call GameTooltip:AddLine etc.
 local INFO_MODULE_RICH_TIPS = {
@@ -259,6 +303,135 @@ local INFO_MODULE_RICH_TIPS = {
         local sign  = delta >= 0 and "|cff44ff44+" or "|cffff4444-"
         GameTooltip:AddLine(string.format("Session: %s%dg %ds %dc|r", sign, g, s, c))
         GameTooltip:AddLine(string.format("Started with: %dg", math.floor(sessionGoldStart / 10000)), 0.6, 0.6, 0.6)
+    end,
+    dailyGold = function()
+        if not TakeMeHomeDB or not TakeMeHomeDB.dailyGold then return end
+        local entry = TakeMeHomeDB.dailyGold[GetCharKey()]
+        if not entry then return end
+        local delta = GetMoney() - entry.start
+        local abs   = math.abs(delta)
+        local g = math.floor(abs / 10000)
+        local s = math.floor((abs % 10000) / 100)
+        local c = abs % 100
+        local sign = delta >= 0 and "|cff44ff44+" or "|cffff4444-"
+        GameTooltip:AddLine(string.format("Today: %s%dg %ds %dc|r", sign, g, s, c))
+        GameTooltip:AddLine(string.format("Started today with: %dg", math.floor(entry.start / 10000)), 0.6, 0.6, 0.6)
+    end,
+    warbandGold = function()
+        if not TakeMeHomeDB or not TakeMeHomeDB.characterGold then return end
+        GameTooltip:AddLine("Gold by character:", 1, 0.84, 0)
+        local sorted = {}
+        local total  = 0
+        for key, copper in pairs(TakeMeHomeDB.characterGold) do
+            local info = TakeMeHomeDB.characterInfo and TakeMeHomeDB.characterInfo[key]
+            table.insert(sorted, { key = key, copper = copper, info = info })
+            total = total + copper
+        end
+        table.sort(sorted, function(a, b) return a.copper > b.copper end)
+        local myRealm = GetRealmName() or ""
+        for _, ent in ipairs(sorted) do
+            local name  = ent.info and ent.info.name  or ent.key
+            local realm = ent.info and ent.info.realm or ""
+            local class = ent.info and ent.info.class
+            local cc    = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+            local hex   = cc and string.format("|cff%02x%02x%02x", math.floor(cc.r*255), math.floor(cc.g*255), math.floor(cc.b*255)) or "|cffffffff"
+            local realmSuffix = realm ~= myRealm and " |cff666677(" .. realm:sub(1,12) .. ")|r" or ""
+            local cg  = math.floor(ent.copper / 10000)
+            local cgS = cg >= 1000 and string.format("%d,%03d", math.floor(cg/1000), cg%1000) or tostring(cg)
+            GameTooltip:AddDoubleLine(hex .. name .. "|r" .. realmSuffix, "|cffd4af37" .. cgS .. "g|r", 1,1,1, 1,1,1)
+        end
+        -- Warband Bank gold (account-wide shared pool)
+        local wbGold = TakeMeHomeDB.warbankGold or 0
+        if wbGold > 0 then
+            local wbg  = math.floor(wbGold / 10000)
+            local wbgS = wbg >= 1000 and string.format("%d,%03d", math.floor(wbg/1000), wbg%1000) or tostring(wbg)
+            GameTooltip:AddLine(" ", 0,0,0)
+            GameTooltip:AddDoubleLine("|cffa0c0ffWarband Bank|r", "|cffd4af37" .. wbgS .. "g|r", 1,1,1, 1,1,1)
+            total = total + wbGold
+        end
+        if #sorted >= 1 then
+            local tg  = math.floor(total / 10000)
+            local tgS = tg >= 1000 and string.format("%d,%03d", math.floor(tg/1000), tg%1000) or tostring(tg)
+            GameTooltip:AddLine(" ", 0,0,0)
+            GameTooltip:AddDoubleLine("Total:", "|cffd4af37" .. tgS .. "g|r", 0.6,0.6,0.6, 1,1,1)
+        end
+    end,
+    playtime = function()
+        local total, level = Playtime.GetLive()
+        if total then
+            GameTooltip:AddLine(string.format("Total: |cffffffff%s|r", Playtime.Format(total)))
+            GameTooltip:AddLine(string.format("At current level: |cffffffff%s|r", Playtime.Format(level)), 0.6, 0.6, 0.6)
+        end
+        if not TakeMeHomeDB or not TakeMeHomeDB.characterPlaytime then return end
+        local sorted = {}
+        local classTotals = {}
+        local accountTotal = 0
+        for key, entry in pairs(TakeMeHomeDB.characterPlaytime) do
+            local info = TakeMeHomeDB.characterInfo and TakeMeHomeDB.characterInfo[key]
+            local seconds = entry.total or 0
+            -- Use the live estimate for the character currently online
+            if key == GetCharKey() and total then seconds = total end
+            table.insert(sorted, { key = key, seconds = seconds, info = info })
+            accountTotal = accountTotal + seconds
+            local class = info and info.class
+            if class then
+                classTotals[class] = (classTotals[class] or 0) + seconds
+            end
+        end
+        table.sort(sorted, function(a, b) return a.seconds > b.seconds end)
+        local myRealm = GetRealmName() or ""
+        GameTooltip:AddLine(" ", 0, 0, 0)
+        GameTooltip:AddLine("Played time by character:", 1, 0.84, 0)
+        for _, ent in ipairs(sorted) do
+            local name  = ent.info and ent.info.name  or ent.key
+            local realm = ent.info and ent.info.realm or ""
+            local class = ent.info and ent.info.class
+            local cc    = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+            local hex   = cc and string.format("|cff%02x%02x%02x", math.floor(cc.r*255), math.floor(cc.g*255), math.floor(cc.b*255)) or "|cffffffff"
+            local realmSuffix = realm ~= myRealm and " |cff666677(" .. realm:sub(1,12) .. ")|r" or ""
+            GameTooltip:AddDoubleLine(hex .. name .. "|r" .. realmSuffix, "|cffadd8e6" .. Playtime.Format(ent.seconds) .. "|r", 1,1,1, 1,1,1)
+        end
+        local sortedClasses = {}
+        for class, seconds in pairs(classTotals) do
+            table.insert(sortedClasses, { class = class, seconds = seconds })
+        end
+        if #sortedClasses >= 1 then
+            table.sort(sortedClasses, function(a, b) return a.seconds > b.seconds end)
+            GameTooltip:AddLine(" ", 0, 0, 0)
+            GameTooltip:AddLine("Total by class:", 1, 0.84, 0)
+            for _, ent in ipairs(sortedClasses) do
+                local cc   = RAID_CLASS_COLORS and RAID_CLASS_COLORS[ent.class]
+                local hex  = cc and string.format("|cff%02x%02x%02x", math.floor(cc.r*255), math.floor(cc.g*255), math.floor(cc.b*255)) or "|cffffffff"
+                local name = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[ent.class]) or ent.class
+                GameTooltip:AddDoubleLine(hex .. name .. "|r", "|cffadd8e6" .. Playtime.Format(ent.seconds) .. "|r", 1,1,1, 1,1,1)
+            end
+        end
+        if #sorted >= 1 then
+            GameTooltip:AddLine(" ", 0, 0, 0)
+            GameTooltip:AddDoubleLine("Account total:", "|cffadd8e6" .. Playtime.Format(accountTotal) .. "|r", 0.6,0.6,0.6, 1,1,1)
+        end
+    end,
+    todoCount = function()
+        if not TakeMeHomeDB or not TakeMeHomeDB.todo then
+            GameTooltip:AddLine("No tasks yet", 0.6, 0.6, 0.6); return
+        end
+        local function countScope(data)
+            local pending, done = 0, 0
+            if data and data.tasks then
+                for _, t in ipairs(data.tasks) do
+                    if t.done then done = done + 1 else pending = pending + 1 end
+                end
+            end
+            return pending, done
+        end
+        local accPend, accDone = countScope(TakeMeHomeDB.todo.account)
+        local ck = GetCharKey()
+        local charData = TakeMeHomeDB.todo.character and TakeMeHomeDB.todo.character[ck]
+        local charPend, charDone = countScope(charData)
+        GameTooltip:AddLine("To Do List", 1, 0.84, 0)
+        GameTooltip:AddDoubleLine("|cffaaaaaa"..accPend.."|r pending  |cff44ff44"..accDone.."|r done", "Account",  1,1,1, 0.7,0.7,1)
+        GameTooltip:AddDoubleLine("|cffaaaaaa"..charPend.."|r pending  |cff44ff44"..charDone.."|r done", "Character", 1,1,1, 0.6,1,0.6)
+        GameTooltip:AddLine("|cff888888Click to open To Do List|r", 0.5,0.5,0.5)
     end,
     bags = function()
         for i = 0, 4 do
@@ -324,14 +497,51 @@ local INFO_MODULE_RICH_TIPS = {
         local num = GetNumSpecializations()
         for i = 1, (num or 0) do
             local _, name, _, icon = GetSpecializationInfo(i)
-            local marker = i == cur and " |cff44ff44◄|r" or ""
+            local marker = i == cur and " |cff44ff44<<|r" or ""
             GameTooltip:AddLine((name or "?") .. marker)
+        end
+    end,
+    xp = function()
+        if UnitLevel("player") >= GetMaxPlayerLevel() then return end
+        local xp    = UnitXP("player")
+        local maxXP = UnitXPMax("player")
+        if maxXP == 0 then return end
+        local rem   = maxXP - xp
+        local rested = GetXPExhaustion() or 0
+        GameTooltip:AddLine(string.format("XP: |cff8888ff%d|r / %d  (|cff8888ff%.2f%%|r)", xp, maxXP, xp/maxXP*100))
+        GameTooltip:AddLine(string.format("Remaining: |cffffffff%d|r", rem))
+        if rested > 0 then
+            GameTooltip:AddLine(string.format("Rested: |cff88ffaa%d|r  (|cff88ffaa%.2f%%|r)", rested, rested/maxXP*100))
         end
     end,
     ilvl = function()
         local equipped, overall = GetAverageItemLevel()
         GameTooltip:AddLine(string.format("Equipped: |cffffffff%.1f|r", equipped or 0))
         GameTooltip:AddLine(string.format("Overall:  |cff888888%.1f|r", overall or 0))
+    end,
+    weeklyReset = function()
+        local ok, secs = pcall(C_DateAndTime.GetSecondsUntilWeeklyReset)
+        if ok and secs and secs > 0 then
+            local d = math.floor(secs / 86400)
+            local h = math.floor((secs % 86400) / 3600)
+            local m = math.floor((secs % 3600) / 60)
+            GameTooltip:AddLine(string.format("Resets in: |cffffffff%dd %dh %dm|r", d, h, m))
+            -- Also show daily
+            local ok2, dsecs = pcall(C_DateAndTime.GetSecondsUntilDailyReset)
+            if ok2 and dsecs and dsecs > 0 then
+                local dh = math.floor(dsecs / 3600)
+                local dm = math.floor((dsecs % 3600) / 60)
+                GameTooltip:AddLine(string.format("Daily in:  |cffadd8e6%dh %dm|r", dh, dm))
+            end
+        end
+    end,
+    dailyReset = function()
+        local ok, secs = pcall(C_DateAndTime.GetSecondsUntilDailyReset)
+        if ok and secs and secs > 0 then
+            local h = math.floor(secs / 3600)
+            local m = math.floor((secs % 3600) / 60)
+            GameTooltip:AddLine(string.format("Daily reset in: |cffffffff%dh %dm|r", h, m))
+        end
     end,
     keystone = function()
         local ok1, level = pcall(C_MythicPlus.GetOwnedKeystoneLevel)
@@ -364,6 +574,12 @@ local INFO_MODULE_ACTIONS = {
     hsCooldown  = function() if mainFrame:IsShown() then mainFrame:Hide() else mainFrame:Show() end end,
     currency    = function() pcall(function() ToggleCharacter("TokenFrame") end) end,
     keystone    = function() pcall(function() PVEFrame_ToggleFrame("ChallengesFrame") end) end,
+    weeklyReset = function() pcall(ToggleCalendar) end,
+    dailyReset  = function() pcall(ToggleCalendar) end,
+    dailyGold   = function() pcall(OpenAllBags) end,
+    warbandGold = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
+    todoCount   = function() if todoFrame:IsShown() then todoFrame:Hide() else todoFrame:Show(); BuildTodoContent() end end,
+    playtime    = function() pcall(function() ToggleCharacter("PaperDollFrame") end) end,
     spec        = function()
         pcall(function()
             if PlayerSpellsFrame and PlayerSpellsFrame:IsShown() then
@@ -414,7 +630,13 @@ local INFO_MODULE_TIPS = {
     hsCooldown  = "Click to toggle Travel window",
     currency    = "Watched currency  |cff888888Click to open Currency tab|r",
     keystone    = "Your Mythic+ keystone  |cff888888Click to open Challenges|r",
+    weeklyReset = "Time until weekly reset  |cff888888Click to open Calendar|r",
+    dailyReset  = "Time until daily reset  |cff888888Click to open Calendar|r",
     spec        = "Click to open Talents  |cff888888Right-click to switch spec|r",
+    dailyGold   = "Gold made/lost today  |cff888888Resets at midnight|r",
+    warbandGold = "Total gold across all characters  |cff888888Click to open Character|r",
+    todoCount   = "Pending tasks (account + character)  |cff888888Click to open To Do List|r",
+    playtime    = "Time played on this character  |cff888888Click to open Character|r",
 }
 
 -- ============================================
@@ -1818,6 +2040,92 @@ local function InitializeButtons()
     UpdateFrameSize()
 end
 
+-- ============================================
+-- MINIMAP BUTTON COLLECTOR (opt-in, off by default)
+-- Sweeps other addons' minimap icon buttons off the minimap so they can be
+-- shown from a single dropdown on the info bar instead
+-- ============================================
+
+-- Single table (not several top-level locals) to stay under the 200 main-chunk
+-- local limit — state, ignore-list, and helpers all hang off this one local.
+local MinimapCollector = {
+    -- Buttons swept up so far this session (list of frame refs)
+    buttons = {},
+    -- Known Blizzard minimap widgets to leave alone (name-matched; addon
+    -- buttons picked up here are typically named "LibDBIcon10_<AddonName>" or similar)
+    ignore = {
+        TakeMeHomeMinimapButton   = true,
+        MinimapZoomIn             = true,
+        MinimapZoomOut            = true,
+        MinimapZoneTextButton     = true,
+        MinimapNorthTag           = true,
+        MinimapCompassTexture     = true,
+        MinimapBackdrop           = true,
+        MinimapBorder             = true,
+        MinimapBorderTop          = true,
+        MinimapCluster            = true,
+        MiniMapWorldMapButton     = true,
+        MiniMapRecordingButton    = true,
+        MiniMapTracking           = true,
+        MiniMapTrackingButton     = true,
+        MiniMapMailFrame          = true,
+        MiniMapMailIcon           = true,
+        MiniMapMailBorder         = true,
+        MiniMapInstanceDifficulty = true,
+        GuildInstanceDifficulty   = true,
+        MiniMapVoiceChatFrame     = true,
+        QueueStatusMinimapButton  = true,
+        GameTimeFrame             = true,
+        TimeManagerClockButton    = true,
+    },
+}
+
+function MinimapCollector.IsCollectible(f)
+    if not f or f:IsForbidden() then return false end
+    local name = f.GetName and f:GetName()
+    if name and MinimapCollector.ignore[name] then return false end
+    if f:GetObjectType() ~= "Button" then return false end
+    local w, h = f:GetSize()
+    if not w or w < 18 or w > 42 or not h or h < 18 or h > 42 then return false end
+    return true
+end
+
+function MinimapCollector.GetIcon(btn)
+    if btn.icon and btn.icon.GetTexture then
+        local t = btn.icon:GetTexture()
+        if t then return t end
+    end
+    for _, r in ipairs({ btn:GetRegions() }) do
+        if r.GetObjectType and r:GetObjectType() == "Texture" and r:GetTexture() then
+            return r:GetTexture()
+        end
+    end
+    return "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+function MinimapCollector.IsEnabled()
+    return TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.minimapCollector
+end
+
+function MinimapCollector.HideIfEnabled(self)
+    if MinimapCollector.IsEnabled() then
+        self:Hide()
+    end
+end
+
+-- Sweeps the minimap for new addon buttons and hides them; safe to call repeatedly
+function MinimapCollector.Scan()
+    if not MinimapCollector.IsEnabled() then return end
+    for _, child in ipairs({ Minimap:GetChildren() }) do
+        if MinimapCollector.IsCollectible(child) and not child.tmhCollected then
+            child.tmhCollected = true
+            table.insert(MinimapCollector.buttons, child)
+            child:Hide()
+            child:HookScript("OnShow", MinimapCollector.HideIfEnabled)
+        end
+    end
+end
+
 -- Event handling
 mainFrame:RegisterEvent("PLAYER_LOGIN")
 mainFrame:RegisterEvent("BAG_UPDATE")
@@ -1825,6 +2133,9 @@ mainFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 mainFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 mainFrame:RegisterEvent("TOYS_UPDATED")
 mainFrame:RegisterEvent("PLAYER_REGEN_ENABLED") -- Out of combat, can update secure buttons
+mainFrame:RegisterEvent("PLAYER_MONEY")
+mainFrame:RegisterEvent("ACCOUNT_MONEY")
+mainFrame:RegisterEvent("TIME_PLAYED_MSG")
 
 mainFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -1900,18 +2211,30 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
             if not TakeMeHomeDB.infoBarSettings.modules[key] then
                 TakeMeHomeDB.infoBarSettings.modules[key] = CopyTable(defaultModule)
             end
-            -- Ensure bar field exists (migration from single-bar versions)
+            -- Ensure bar and section fields exist
             if TakeMeHomeDB.infoBarSettings.modules[key].bar == nil then
                 TakeMeHomeDB.infoBarSettings.modules[key].bar = "bottom"
+            end
+            if TakeMeHomeDB.infoBarSettings.modules[key].section == nil then
+                TakeMeHomeDB.infoBarSettings.modules[key].section = defaultModule.section or "left"
             end
         end
         if TakeMeHomeDB.infoBarSettings.topEnabled == nil then
             TakeMeHomeDB.infoBarSettings.topEnabled = false
         end
+        if TakeMeHomeDB.infoBarSettings.topYOffset == nil then
+            TakeMeHomeDB.infoBarSettings.topYOffset = 0
+        end
         -- Remove legacy att text module if it exists
         TakeMeHomeDB.infoBarSettings.modules["att"] = nil
+        -- Remove the short-lived minimapCollector module entry from the movable-module
+        -- experiment; it's a dedicated bar button again, not a generic module
+        TakeMeHomeDB.infoBarSettings.modules["minimapCollector"] = nil
         if TakeMeHomeDB.infoBarSettings.attButton == nil then
             TakeMeHomeDB.infoBarSettings.attButton = defaults.infoBarSettings.attButton
+        end
+        if TakeMeHomeDB.infoBarSettings.minimapCollector == nil then
+            TakeMeHomeDB.infoBarSettings.minimapCollector = defaults.infoBarSettings.minimapCollector
         end
 
         -- Ensure all button keys exist
@@ -1956,6 +2279,67 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
         -- Initialize info bar
         InitializeInfoBar()
 
+        -- Session gold baseline (set here, once per session)
+        sessionGoldStart = GetMoney()
+
+        -- Daily gold tracking — reset baseline when the calendar day changes
+        if not TakeMeHomeDB.dailyGold then TakeMeHomeDB.dailyGold = {} end
+        local charKeyLogin = GetCharKey()
+        local today = date("%Y%m%d")
+        if not TakeMeHomeDB.dailyGold[charKeyLogin] or TakeMeHomeDB.dailyGold[charKeyLogin].date ~= today then
+            TakeMeHomeDB.dailyGold[charKeyLogin] = { start = GetMoney(), date = today }
+        end
+
+        -- Warband gold — persist this character's gold so other alts can see it
+        if not TakeMeHomeDB.characterGold then TakeMeHomeDB.characterGold = {} end
+        if not TakeMeHomeDB.characterInfo  then TakeMeHomeDB.characterInfo  = {} end
+        TakeMeHomeDB.characterGold[charKeyLogin] = GetMoney()
+        TakeMeHomeDB.characterInfo[charKeyLogin]  = {
+            name  = UnitName("player") or charKeyLogin,
+            realm = GetRealmName()     or "Unknown",
+            class = select(2, UnitClass("player")),
+            level = UnitLevel("player"),
+        }
+
+        -- Time played tracking — request a fresh baseline from the server now,
+        -- and periodically thereafter to keep it accurate and drift-free
+        if not TakeMeHomeDB.characterPlaytime then TakeMeHomeDB.characterPlaytime = {} end
+        RequestTimePlayed()
+        C_Timer.NewTicker(600, function() RequestTimePlayed() end)
+
+        -- Minimap button collector — initial sweep + periodic re-sweep for
+        -- buttons that register with the minimap after login (Scan() itself
+        -- checks whether the module is enabled, so this is a safe no-op otherwise)
+        C_Timer.After(2, MinimapCollector.Scan)
+        C_Timer.NewTicker(5, MinimapCollector.Scan)
+
+        -- To Do List storage
+        if not TakeMeHomeDB.todo then
+            TakeMeHomeDB.todo = {
+                account   = { groups = {}, tasks = {}, nextGroupId = 1, nextTaskId = 1 },
+                character = {},
+            }
+        end
+        -- Seed a default "General" group on first use
+        if #TakeMeHomeDB.todo.account.groups == 0 then
+            local gid = TakeMeHomeDB.todo.account.nextGroupId
+            TakeMeHomeDB.todo.account.nextGroupId = gid + 1
+            table.insert(TakeMeHomeDB.todo.account.groups, { id = gid, name = "General", order = gid, collapsed = false })
+        end
+        -- Restore saved todo window position
+        if TakeMeHomeDB.todoPosition then
+            local tp = TakeMeHomeDB.todoPosition
+            todoFrame:ClearAllPoints()
+            todoFrame:SetPoint(tp.point, UIParent, tp.point, tp.x, tp.y)
+        end
+
+        -- Warband Bank gold (account-wide shared pool)
+        if not TakeMeHomeDB.warbankGold then TakeMeHomeDB.warbankGold = 0 end
+        local wbOk, wbGold = pcall(C_Bank.FetchDepositedMoney, Enum.BankType.Account)
+        if wbOk and type(wbGold) == "number" then
+            TakeMeHomeDB.warbankGold = wbGold
+        end
+
         -- Initial update
         C_Timer.After(1, UpdateAllButtons)
 
@@ -1978,6 +2362,27 @@ mainFrame:SetScript("OnEvent", function(self, event, ...)
         UpdateWarbandBankButton()
         UpdateMobileBankingButton()
         UpdateDruidTeleportButton()
+    elseif event == "PLAYER_MONEY" then
+        if TakeMeHomeDB and TakeMeHomeDB.characterGold then
+            TakeMeHomeDB.characterGold[GetCharKey()] = GetMoney()
+        end
+    elseif event == "ACCOUNT_MONEY" then
+        if TakeMeHomeDB then
+            local wbOk, wbGold = pcall(C_Bank.FetchDepositedMoney, Enum.BankType.Account)
+            if wbOk and type(wbGold) == "number" then
+                TakeMeHomeDB.warbankGold = wbGold
+            end
+        end
+    elseif event == "TIME_PLAYED_MSG" then
+        local totalTime, levelTime = ...
+        if type(totalTime) == "number" then
+            Playtime.baselineTotal = totalTime
+            Playtime.baselineLevel = levelTime or totalTime
+            Playtime.baselineTime  = GetTime()
+            if TakeMeHomeDB and TakeMeHomeDB.characterPlaytime then
+                TakeMeHomeDB.characterPlaytime[GetCharKey()] = { total = totalTime, level = Playtime.baselineLevel }
+            end
+        end
     end
 end)
 
@@ -2090,6 +2495,13 @@ end
 
 local MISSION_TABLE_DEFINITIONS  -- forward declaration; assigned below near mission window code
 
+-- Individual module button registries (populated in InitializeInfoBar). Declared
+-- here — not next to their other info-bar code further down — because
+-- CreateConfigPanel's section-cycle button (below) closes over them; a local
+-- declared later in the file is out of lexical scope for a function defined earlier.
+local infoBarModuleBtns = {}   -- bottom bar
+local infoBarTopBtns    = {}   -- top bar
+
 local function CreateConfigPanel()
     if configFrame then configFrame:Show() return end
 
@@ -2160,31 +2572,43 @@ local function CreateConfigPanel()
     contentScroll:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -22, 4)
 
     local contentParent = CreateFrame("Frame", nil, contentScroll)
-    contentParent:SetSize(CONTENT_W - 30, 2000)
+    contentParent:SetSize(CONTENT_W - 30, 4000)
     contentScroll:SetScrollChild(contentParent)
 
     -- Section content frames (only one shown at a time)
-    local sections = {}
-    local navButtons = {}
+    local sections        = {}
+    local navButtons      = {}
     local navSectionCount = 0
-    local activeSection = nil
+    local activeSection   = nil
 
     local function ShowSection(key)
         activeSection = key
         for k, frame in pairs(sections) do
-            if k == key then frame:Show() else frame:Hide() end
+            if k == key then
+                -- Move active section to (0,0) and show it
+                frame:ClearAllPoints()
+                frame:SetPoint("TOPLEFT", contentParent, "TOPLEFT", 0, 0)
+                frame:Show()
+            else
+                -- Move inactive sections far off-screen so they cannot overlap
+                frame:ClearAllPoints()
+                frame:SetPoint("TOPLEFT", contentParent, "TOPLEFT", 50000, 0)
+                frame:Hide()
+            end
         end
         for k, btn in pairs(navButtons) do
             if k == key then btn:SetBackdropColor(0.15, 0.40, 0.70, 1)
             else              btn:SetBackdropColor(0.10, 0.10, 0.14, 0) end
         end
         contentScroll:SetVerticalScroll(0)
+        if contentScroll.ScrollBar then contentScroll.ScrollBar:SetValue(0) end
     end
 
     local function AddSection(key, label, icon)
         local sec = CreateFrame("Frame", nil, contentParent)
-        sec:SetSize(CONTENT_W - 30, 1800)
-        sec:SetPoint("TOPLEFT")
+        sec:SetSize(CONTENT_W - 30, 4000)
+        -- Start off-screen; ShowSection moves active one to (0,0)
+        sec:SetPoint("TOPLEFT", contentParent, "TOPLEFT", 50000, 0)
         sec:Hide()
         sections[key] = sec
 
@@ -2303,6 +2727,33 @@ local function CreateConfigPanel()
             function(v) if TakeMeHomeDB.infoBarSettings then TakeMeHomeDB.infoBarSettings.topEnabled = v; UpdateInfoBar() end end)
         y = y - 36
 
+        -- Y-offset sliders (separate for bottom and top)
+        local function MakeYOffSlider(name, label, settingKey, yy)
+            local lbl = barSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            lbl:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, yy)
+            lbl:SetText(label)
+            local sl = CreateFrame("Slider", "TakeMeHome" .. name .. "Slider", barSec, "OptionsSliderTemplate")
+            sl:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, yy - 22)
+            sl:SetWidth(220)
+            sl:SetMinMaxValues(0, 200)
+            sl:SetValueStep(1)
+            sl:SetValue(TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings[settingKey] or 0)
+            _G[sl:GetName().."Low"]:SetText("0")
+            _G[sl:GetName().."High"]:SetText("200")
+            _G[sl:GetName().."Text"]:SetText(math.floor(sl:GetValue()) .. "px")
+            sl:SetScript("OnValueChanged", function(self, val)
+                val = math.floor(val)
+                _G[self:GetName().."Text"]:SetText(val .. "px")
+                if TakeMeHomeDB and TakeMeHomeDB.infoBarSettings then
+                    TakeMeHomeDB.infoBarSettings[settingKey] = val
+                    UpdateInfoBarPosition()
+                end
+            end)
+            return sl
+        end
+        MakeYOffSlider("BotYOff", "Bottom Bar Y Offset:", "yOffset",    y); y = y - 70
+        MakeYOffSlider("TopYOff", "Top Bar Y Offset:",    "topYOffset", y); y = y - 70
+
         -- ATT button toggle (if ATT loaded)
         if C_AddOns.IsAddOnLoaded("AllTheThings") then
             MakeCheckRow(barSec, y,
@@ -2315,6 +2766,16 @@ local function CreateConfigPanel()
             y = y - 36
         end
 
+        -- Minimap button collector toggle
+        MakeCheckRow(barSec, y,
+            "Collect minimap buttons into a bar dropdown (declutters minimap)",
+            TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.minimapCollector or false,
+            function(v)
+                TakeMeHomeDB.infoBarSettings.minimapCollector = v
+                print("|cff00ff00TakeMeHome|r: Reload UI to apply minimap collector change.")
+            end)
+        y = y - 36
+
         -- Modules header
         local modHdr = barSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         modHdr:SetPoint("TOPLEFT", barSec, "TOPLEFT", 4, y)
@@ -2322,7 +2783,18 @@ local function CreateConfigPanel()
         y = y - 22
 
         local secColors = { left="|cff88aaff", center="|cff88ffaa", right="|cffffaa88" }
-        for i, mod in ipairs(INFO_BAR_MODULES) do
+        -- Sort modules by saved order for display
+        local sortedBarMods = {}
+        for _, mod in ipairs(INFO_BAR_MODULES) do table.insert(sortedBarMods, mod) end
+        table.sort(sortedBarMods, function(a, b)
+            local oa = (TakeMeHomeDB.infoBarSettings.modules[a.key] or {}).order or a.order
+            local ob = (TakeMeHomeDB.infoBarSettings.modules[b.key] or {}).order or b.order
+            return oa < ob
+        end)
+        -- Track rows for live swapping
+        local modRows = {}  -- { frame, modKey, yPos }
+
+        for i, mod in ipairs(sortedBarMods) do
             local settings = TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.modules[mod.key]
             local row = CreateFrame("Frame", nil, barSec, "BackdropTemplate")
             row:SetSize(480, 26)
@@ -2347,18 +2819,64 @@ local function CreateConfigPanel()
             lbl:SetPoint("LEFT", cb, "RIGHT", 2, 0)
             lbl:SetText(mod.name)
 
-            -- Section label (left/center/right)
-            local secLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            secLbl:SetPoint("RIGHT", row, "RIGHT", -80, 0)
-            local secText = (secColors[mod.section] or "|cff888888") .. mod.section .. "|r"
-            if INFO_MODULE_ACTIONS[mod.key] then secText = secText .. " |cff44ff88⊕|r" end
-            secLbl:SetText(secText)
+            -- Click indicator
+            if INFO_MODULE_ACTIONS[mod.key] then
+                local clickLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                clickLbl:SetPoint("RIGHT", row, "RIGHT", -122, 0)
+                clickLbl:SetText("|cff44ff88[C]|r")
+            end
+
+            -- Section cycle button: Left → Center → Right → Left
+            -- Layout from right: [▲/▼ 18px] [Bot/Top 56px] [L/C/R 28px] gap
+            local SECTIONS = { "left", "center", "right" }
+            local SEC_LABELS = { left="|cff88aaffL|r", center="|cff88ffaaC|r", right="|cffffaa88R|r" }
+            local secBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
+            secBtn:SetSize(26, 18)
+            secBtn:SetPoint("RIGHT", row, "RIGHT", -96, 0)
+            secBtn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
+            secBtn:SetBackdropBorderColor(0.3, 0.3, 0.4, 1)
+            secBtn.modKey = mod.key
+            local secLbl2 = secBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            secLbl2:SetPoint("CENTER")
+            secBtn.lbl = secLbl2
+            local function RefreshSecBtn(self)
+                local cur = (TakeMeHomeDB.infoBarSettings.modules[self.modKey] or {}).section or "left"
+                self:SetBackdropColor(cur=="left" and 0.1 or cur=="center" and 0.05 or 0.1,
+                                      cur=="left" and 0.2 or cur=="center" and 0.25 or 0.15,
+                                      cur=="left" and 0.5 or cur=="center" and 0.1  or 0.05, 1)
+                self.lbl:SetText(SEC_LABELS[cur] or cur)
+            end
+            RefreshSecBtn(secBtn)
+            secBtn:SetScript("OnClick", function(self)
+                local s = TakeMeHomeDB.infoBarSettings.modules[self.modKey]
+                if not s then return end
+                local cur = s.section or "left"
+                local idx = 1
+                for i, v in ipairs(SECTIONS) do if v == cur then idx = i break end end
+                s.section = SECTIONS[(idx % #SECTIONS) + 1]
+                RefreshSecBtn(self)
+                -- Apply live: update btn.section and force reflow
+                for _, btn in ipairs(infoBarModuleBtns) do
+                    if btn.modKey == self.modKey then btn.section = s.section end
+                end
+                for _, btn in ipairs(infoBarTopBtns) do
+                    if btn.modKey == self.modKey then btn.section = s.section end
+                end
+                ReflowInfoBar()
+            end)
+            secBtn:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:SetText("Click to cycle section", 0.7, 0.7, 0.7)
+                GameTooltip:AddLine("Left  →  Center  →  Right", 0.5, 0.5, 0.5)
+                GameTooltip:Show()
+            end)
+            secBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
             -- Bot / Top toggle button
             local curBar = (settings and settings.bar) or "bottom"
             local barToggle = CreateFrame("Button", nil, row, "BackdropTemplate")
-            barToggle:SetSize(56, 18)
-            barToggle:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+            barToggle:SetSize(46, 18)
+            barToggle:SetPoint("RIGHT", row, "RIGHT", -46, 0)
             barToggle:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
             barToggle.modKey = mod.key
             local function RefreshBarToggle(self)
@@ -2379,6 +2897,66 @@ local function CreateConfigPanel()
                     print("|cff00ff00TakeMeHome|r: Reload UI to apply bar change.")
                 end
             end)
+
+            -- Track this row
+            row.yPos = y
+            table.insert(modRows, { frame = row, modKey = mod.key, yPos = y })
+
+            -- ▲ / ▼ reorder buttons
+            local function MakeArrowBtn(parent, label, direction)
+                local ab = CreateFrame("Button", nil, parent, "BackdropTemplate")
+                ab:SetSize(18, 12)
+                ab:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1 })
+                ab:SetBackdropColor(0.15, 0.15, 0.2, 1)
+                ab:SetBackdropBorderColor(0.3, 0.3, 0.4, 1)
+                local al = ab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                al:SetPoint("CENTER")
+                al:SetText(label)
+                ab:SetScript("OnEnter", function(self) self:SetBackdropColor(0.25, 0.35, 0.55, 1) end)
+                ab:SetScript("OnLeave", function(self) self:SetBackdropColor(0.15, 0.15, 0.2, 1) end)
+                ab.direction = direction
+                return ab
+            end
+
+            local upBtn   = MakeArrowBtn(row, "^", -1)
+            local downBtn = MakeArrowBtn(row, "v",  1)
+            upBtn:SetSize(18, 20)
+            downBtn:SetSize(18, 20)
+            upBtn:SetPoint("RIGHT",   row, "RIGHT",  -4,  0)
+            downBtn:SetPoint("RIGHT", row, "RIGHT", -24,  0)
+            upBtn.rowRef   = modRows
+            downBtn.rowRef = modRows
+
+            local function SwapRows(rowIdx, otherIdx)
+                if otherIdx < 1 or otherIdx > #modRows then return end
+                local rA = modRows[rowIdx]
+                local rB = modRows[otherIdx]
+                -- Swap DB order values
+                local sA = TakeMeHomeDB.infoBarSettings.modules[rA.modKey]
+                local sB = TakeMeHomeDB.infoBarSettings.modules[rB.modKey]
+                if sA and sB then
+                    sA.order, sB.order = sB.order, sA.order
+                end
+                -- Swap row frame y positions
+                rA.frame:ClearAllPoints()
+                rB.frame:ClearAllPoints()
+                rA.frame:SetPoint("TOPLEFT", barSec, "TOPLEFT", 0, rB.yPos)
+                rB.frame:SetPoint("TOPLEFT", barSec, "TOPLEFT", 0, rA.yPos)
+                rA.yPos, rB.yPos = rB.yPos, rA.yPos
+                -- Swap in modRows table
+                modRows[rowIdx], modRows[otherIdx] = modRows[otherIdx], modRows[rowIdx]
+                -- Update live bar
+                ResortAndReflow()
+            end
+
+            local myKey = mod.key
+            local function FindIdx()
+                for idx, r in ipairs(modRows) do
+                    if r.modKey == myKey then return idx end
+                end
+            end
+            upBtn:SetScript("OnClick",   function() local idx = FindIdx(); if idx then SwapRows(idx, idx - 1) end end)
+            downBtn:SetScript("OnClick", function() local idx = FindIdx(); if idx then SwapRows(idx, idx + 1) end end)
 
             y = y - 27
         end
@@ -2433,17 +3011,17 @@ local function CreateConfigPanel()
         y = y - 30
 
         local function RefreshProfSection()
-            for _, c in ipairs({profSec:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+            for _, c in ipairs({profSec:GetChildren()}) do c:Hide() end
             local profs = GetLearnedProfessions()
             if #profs == 0 then
                 local msg = profSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                msg:SetPoint("TOPLEFT", profSec, "TOPLEFT", 4, -8)
+                msg:SetPoint("TOPLEFT", profSec, "TOPLEFT", 4, -38)
                 msg:SetText("No crafting professions learned")
                 msg:SetTextColor(0.5, 0.5, 0.5)
                 return
             end
             table.sort(profs, function(a,b) return GetProfessionOrder(a.name) < GetProfessionOrder(b.name) end)
-            local ly = -8
+            local ly = -38
             for i, prof in ipairs(profs) do
                 if not TakeMeHomeDB.professionSettings[prof.name] then
                     TakeMeHomeDB.professionSettings[prof.name] = { enabled=true, order=i }
@@ -2485,9 +3063,9 @@ local function CreateConfigPanel()
         y = y - 30
 
         local function RefreshMountsSection()
-            for _, c in ipairs({mountsSec:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+            for _, c in ipairs({mountsSec:GetChildren()}) do c:Hide() end
             local sel = TakeMeHomeDB.selectedMounts or {}
-            local ly = -8
+            local ly = -38   -- start below the outer "Mounts" header
             local hdr2 = mountsSec:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             hdr2:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 4, ly)
             hdr2:SetText(string.format("|cff4da6ffSelected (%d/6)|r", #sel))
@@ -2534,7 +3112,7 @@ local function CreateConfigPanel()
                 local rc = CreateFrame("Frame", nil, mountsSec)
                 rc:SetSize(480, 120); rc:SetPoint("TOPLEFT", mountsSec, "TOPLEFT", 0, ly)
                 local function DoSearch(txt)
-                    for _, c in ipairs({rc:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+                    for _, c in ipairs({rc:GetChildren()}) do c:Hide() end
                     if not txt or txt=="" then return end
                     txt = txt:lower()
                     local results, n = {}, 0
@@ -2845,7 +3423,7 @@ UpdateProfessionButtons = function()
     -- Clear existing buttons
     for _, button in ipairs(professionButtons) do
         button:Hide()
-        button:SetParent(nil)
+        -- button:SetParent(nil) removed -- nil re-parents to UIParent causing floating frames
     end
     wipe(professionButtons)
 
@@ -3114,7 +3692,7 @@ UpdateMountButtons = function()
     -- Clear existing buttons
     for _, button in ipairs(mountButtons) do
         button:Hide()
-        button:SetParent(nil)
+        -- button:SetParent(nil) removed -- nil re-parents to UIParent causing floating frames
     end
     wipe(mountButtons)
 
@@ -3421,7 +3999,7 @@ UpdateFunctionButtons = function()
     -- Clear existing buttons
     for _, button in ipairs(functionButtons) do
         button:Hide()
-        button:SetParent(nil)
+        -- button:SetParent(nil) removed -- nil re-parents to UIParent causing floating frames
     end
     wipe(functionButtons)
 
@@ -3710,7 +4288,7 @@ UpdateMissionButtons = function()
     -- Clear existing buttons
     for _, button in ipairs(missionButtons) do
         button:Hide()
-        button:SetParent(nil)
+        -- button:SetParent(nil) removed -- nil re-parents to UIParent causing floating frames
     end
     wipe(missionButtons)
 
@@ -3806,9 +4384,7 @@ infoBarTop:SetBackdrop({
 infoBarTop:SetBackdropColor(0.05, 0.05, 0.08, 0.88)
 infoBarTop:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.8)
 
--- Individual module button registries (populated in InitializeInfoBar)
-local infoBarModuleBtns  = {}   -- bottom bar
-local infoBarTopBtns     = {}   -- top bar
+-- infoBarModuleBtns / infoBarTopBtns declared earlier (near CreateConfigPanel)
 local infoBarLeftOffset  = 8    -- updated after toggle+ATT buttons on bottom bar
 local infoBarRightOffset = 28   -- updated after cog + notification dots on bottom bar
 local barHsBtn           = nil  -- quick-cast hearthstone button
@@ -3832,7 +4408,11 @@ local function CreateInfoModuleBtn(key, section, barFrame)
     btn.lbl = lbl
 
     btn.modKey  = key
-    btn.section = section
+    -- Use saved section if available, fall back to module definition default
+    local savedSection = TakeMeHomeDB and TakeMeHomeDB.infoBarSettings and
+                         TakeMeHomeDB.infoBarSettings.modules[key] and
+                         TakeMeHomeDB.infoBarSettings.modules[key].section
+    btn.section = savedSection or section
 
     local hasLeft  = INFO_MODULE_ACTIONS[key] ~= nil
     local hasRight = INFO_MODULE_RIGHT_ACTIONS and INFO_MODULE_RIGHT_ACTIONS[key] ~= nil
@@ -3850,6 +4430,7 @@ local function CreateInfoModuleBtn(key, section, barFrame)
                 end
             end)
         elseif hasLeft then
+            btn:RegisterForClicks("LeftButtonUp")
             btn:SetScript("OnClick", function(self) INFO_MODULE_ACTIONS[self.modKey](self) end)
         else
             btn:RegisterForClicks("RightButtonUp")
@@ -3922,6 +4503,20 @@ end
 local function ReflowInfoBar()
     ReflowBar(infoBar,    infoBarModuleBtns, infoBarLeftOffset, infoBarRightOffset)
     ReflowBar(infoBarTop, infoBarTopBtns,    8,                 28)
+end
+
+local function ResortAndReflow()
+    if not TakeMeHomeDB then return end
+    local function SortBtns(btns)
+        table.sort(btns, function(a, b)
+            local oa = (TakeMeHomeDB.infoBarSettings.modules[a.modKey] or {}).order or 99
+            local ob = (TakeMeHomeDB.infoBarSettings.modules[b.modKey] or {}).order or 99
+            return oa < ob
+        end)
+    end
+    SortBtns(infoBarModuleBtns)
+    SortBtns(infoBarTopBtns)
+    ReflowInfoBar()
 end
 
 local function FormatGold(money)
@@ -4008,11 +4603,14 @@ local function GetInfoModuleText(key)
 
     elseif key == "xp" then
         if UnitLevel("player") >= GetMaxPlayerLevel() then return "" end
-        local xp = UnitXP("player")
+        local xp    = UnitXP("player")
         local maxXP = UnitXPMax("player")
         if maxXP == 0 then return "" end
-        local pct = math.floor(xp / maxXP * 100)
-        return "|cff888888XP |r|cff8888ff" .. pct .. "%|r"
+        local pct     = xp / maxXP * 100
+        local rested  = GetXPExhaustion() or 0
+        local restPct = rested / maxXP * 100
+        local restStr = restPct > 0 and string.format(" |cff88ffaa+%.2f%%|r", restPct) or ""
+        return string.format("|cff888888XP |r|cff8888ff%.2f%%|r%s", pct, restStr)
 
     elseif key == "ilvl" then
         local equipped, _ = GetAverageItemLevel()
@@ -4021,20 +4619,25 @@ local function GetInfoModuleText(key)
 
     elseif key == "rep" then
         local ok, result = pcall(function()
+            -- Try C_Reputation first; validate result is in range before using it
             if C_Reputation and C_Reputation.GetWatchedFactionData then
                 local d = C_Reputation.GetWatchedFactionData()
                 if d and d.name then
                     local cur = (d.currentValue or 0) - (d.currentReactionThreshold or 0)
-                    local max = (d.nextReactionThreshold or 1) - (d.currentReactionThreshold or 0)
-                    if max > 0 then
-                        local pct = math.floor(cur / max * 100)
-                        return "|cff888888" .. d.name:sub(1, 18) .. " |r|cffadd8e6" .. pct .. "%|r"
+                    local rng = (d.nextReactionThreshold or 0) - (d.currentReactionThreshold or 0)
+                    if rng > 0 then
+                        local pct = math.floor(cur / rng * 100)
+                        if pct >= 0 and pct <= 100 then
+                            return "|cff888888" .. d.name:sub(1, 18) .. " |r|cffadd8e6" .. pct .. "%|r"
+                        end
                     end
                 end
             end
-            local name, _, min, max, value = GetWatchedFactionInfo()
-            if name and max and max > min then
-                local pct = math.floor((value - min) / (max - min) * 100)
+            -- Fallback: GetWatchedFactionInfo returns reliable barMin/barMax/barValue
+            local name, _, barMin, barMax, barValue = GetWatchedFactionInfo()
+            if name and barMax and barMax > barMin then
+                local pct = math.floor((barValue - barMin) / (barMax - barMin) * 100)
+                pct = math.max(0, math.min(100, pct))
                 return "|cff888888" .. name:sub(1, 18) .. " |r|cffadd8e6" .. pct .. "%|r"
             end
             return nil
@@ -4108,6 +4711,31 @@ local function GetInfoModuleText(key)
         end
         return "|cff888888HS |r|cff44ff44Ready|r"
 
+    elseif key == "weeklyReset" or key == "dailyReset" then
+        local secs
+        if key == "weeklyReset" then
+            local ok, s = pcall(C_DateAndTime.GetSecondsUntilWeeklyReset)
+            if ok then secs = s end
+        else
+            local ok, s = pcall(C_DateAndTime.GetSecondsUntilDailyReset)
+            if ok then secs = s end
+        end
+        if not secs or secs <= 0 then return "" end
+        local label = key == "weeklyReset" and "|cff888888Weekly |r" or "|cff888888Daily |r"
+        local d = math.floor(secs / 86400)
+        local h = math.floor((secs % 86400) / 3600)
+        local m = math.floor((secs % 3600) / 60)
+        local color = secs < 3600 and "|cffff4444" or secs < 14400 and "|cffffff44" or "|cffadd8e6"
+        local str
+        if d > 0 then
+            str = string.format("%dd %dh", d, h)
+        elseif h > 0 then
+            str = string.format("%dh %dm", h, m)
+        else
+            str = string.format("%dm", m)
+        end
+        return label .. color .. str .. "|r"
+
     elseif key == "currency" then
         local ok, info = pcall(C_CurrencyInfo.GetWatchedCurrencyInfo)
         if ok and info and info.name then
@@ -4131,6 +4759,64 @@ local function GetInfoModuleText(key)
         local color = level >= 15 and "|cffff8844" or level >= 10 and "|cffffff44" or "|cff44ff44"
         return "|cff888888Key |r" .. color .. "+" .. level .. "|r" .. "|cffaaaaaa" .. name .. "|r"
 
+    elseif key == "dailyGold" then
+        if not TakeMeHomeDB or not TakeMeHomeDB.dailyGold then return "" end
+        local entry = TakeMeHomeDB.dailyGold[GetCharKey()]
+        if not entry then return "" end
+        local delta = GetMoney() - entry.start
+        if delta == 0 then return "" end
+        local color = delta > 0 and "|cff44ff44" or "|cffff4444"
+        local sign  = delta > 0 and "+" or "-"
+        local abs   = math.abs(delta)
+        local g = math.floor(abs / 10000)
+        local s = math.floor((abs % 10000) / 100)
+        local c = abs % 100
+        if g > 0 then
+            return "|cff888888Day |r" .. color .. sign .. g .. "g " .. s .. "s|r"
+        elseif s > 0 then
+            return "|cff888888Day |r" .. color .. sign .. s .. "s " .. c .. "c|r"
+        else
+            return "|cff888888Day |r" .. color .. sign .. c .. "c|r"
+        end
+
+    elseif key == "warbandGold" then
+        if not TakeMeHomeDB or not TakeMeHomeDB.characterGold then return "" end
+        local total = 0
+        for _, copper in pairs(TakeMeHomeDB.characterGold) do
+            total = total + copper
+        end
+        total = total + (TakeMeHomeDB.warbankGold or 0)
+        if total <= 0 then return "" end
+        return "|cff888888Warband |r" .. FormatGold(total)
+
+    elseif key == "playtime" then
+        local total = Playtime.GetLive()
+        if not total then return "" end
+        return "|cff888888Played |r|cffadd8e6" .. Playtime.Format(total) .. "|r"
+
+    elseif key == "todoCount" then
+        if not TakeMeHomeDB or not TakeMeHomeDB.todo then return "" end
+        local pending = 0
+        local total   = 0
+        local acc = TakeMeHomeDB.todo.account
+        if acc and acc.tasks then
+            for _, t in ipairs(acc.tasks) do
+                total = total + 1
+                if not t.done then pending = pending + 1 end
+            end
+        end
+        local ck = GetCharKey()
+        local char = TakeMeHomeDB.todo.character and TakeMeHomeDB.todo.character[ck]
+        if char and char.tasks then
+            for _, t in ipairs(char.tasks) do
+                total = total + 1
+                if not t.done then pending = pending + 1 end
+            end
+        end
+        if total == 0 then return "" end
+        local color = pending == 0 and "|cff44ff44" or "|cffffff44"
+        return "|cff888888Todo |r" .. color .. pending .. "|r"
+
     elseif key == "att" then
         return "" -- ATT is now a dedicated bar button; see InitializeInfoBar
     end
@@ -4141,6 +4827,11 @@ end
 local function UpdateBarBtns(btns, needReflowRef)
     for _, btn in ipairs(btns) do
         local s = TakeMeHomeDB.infoBarSettings.modules[btn.modKey]
+        -- Sync section from saved settings (allows live reassignment)
+        if s and s.section and s.section ~= btn.section then
+            btn.section = s.section
+            needReflowRef[1] = true
+        end
         if s and s.enabled then
             local text = GetInfoModuleText(btn.modKey)
             if text and text ~= "" then
@@ -4202,25 +4893,17 @@ UpdateInfoBar = function()
                 barHsBtn._tip2 = "Click to use" .. remStr
             end
         end
-        -- Quick-cast: favourite mount (random from journal favourites)
-        if barMountBtn then
-            barMountBtn:SetAttribute("type", "macro")
-            barMountBtn:SetAttribute("macrotext", "/run C_MountJournal.SummonByID(0)")
-            barMountBtn.icon:SetTexture("Interface\\Icons\\ability_mount_mountainram")
-            barMountBtn._tip  = "Summon Random Favourite Mount"
-            barMountBtn._tip2 = "Click to summon"
-            barMountBtn:Show()
-        end
-        if userWantsWindowsVisible then infoBar:Show() end
-    else
+        -- Mount button attributes are set once at InitializeInfoBar — nothing to update here
+        if userWantsWindowsVisible and not infoBar:IsShown() then infoBar:Show() end
+    elseif not InCombatLockdown() then
         infoBar:Hide()
     end
 
     -- Top bar
     if cfg.topEnabled then
         UpdateBarBtns(infoBarTopBtns, needReflow)
-        if userWantsWindowsVisible then infoBarTop:Show() end
-    else
+        if userWantsWindowsVisible and not infoBarTop:IsShown() then infoBarTop:Show() end
+    elseif not InCombatLockdown() then
         infoBarTop:Hide()
     end
 
@@ -4229,13 +4912,14 @@ end
 
 UpdateInfoBarPosition = function()
     if not TakeMeHomeDB or not TakeMeHomeDB.infoBarSettings then return end
-    local yOff = TakeMeHomeDB.infoBarSettings.yOffset or 0
+    local bot = TakeMeHomeDB.infoBarSettings.yOffset    or 0
+    local top = TakeMeHomeDB.infoBarSettings.topYOffset or 0
     infoBar:ClearAllPoints()
-    infoBar:SetPoint("BOTTOMLEFT",  UIParent, "BOTTOMLEFT",  0,  yOff)
-    infoBar:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0,  yOff)
+    infoBar:SetPoint("BOTTOMLEFT",  UIParent, "BOTTOMLEFT",  0,  bot)
+    infoBar:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0,  bot)
     infoBarTop:ClearAllPoints()
-    infoBarTop:SetPoint("TOPLEFT",  UIParent, "TOPLEFT",  0, -yOff)
-    infoBarTop:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, -yOff)
+    infoBarTop:SetPoint("TOPLEFT",  UIParent, "TOPLEFT",  0, -top)
+    infoBarTop:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, -top)
 end
 
 -- Spec switcher dropdown (lazy-created on first right-click)
@@ -4337,6 +5021,7 @@ InitializeInfoBar = function()
         { key = "professions", name = "Professions", icon = "Interface\\Icons\\trade_alchemy",                 frame = professionFrame, showFunc = UpdateProfessionButtons },
         { key = "function",    name = "Function",    icon = "Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up", frame = functionFrame,   showFunc = UpdateFunctionButtons },
         { key = "missions",    name = "Missions",    icon = "Interface\\Icons\\inv_garrison_resource",         frame = missionFrame,    showFunc = UpdateMissionButtons },
+        { key = "todo",        name = "To Do List",  icon = "Interface\\Icons\\achievement_quests_completed_04", frame = todoFrame,       showFunc = function() todoFrame:Show(); BuildTodoContent() end },
     }
 
     local btnSize = 16
@@ -4474,7 +5159,6 @@ InitializeInfoBar = function()
 
             row:SetScript("OnClick", function(self)
                 attDD:Hide()
-                print("|cff00ff00TakeMeHome|r: ATT click — cmd=|cff00ffff" .. tostring(self.expCmd) .. "|r  handler=" .. tostring(attSlashHandler))
                 if attSlashHandler then
                     pcall(attSlashHandler, self.expCmd)
                 end
@@ -4652,7 +5336,12 @@ InitializeInfoBar = function()
     wipe(infoBarTopBtns)
     local sortedMods = {}
     for _, mod in ipairs(INFO_BAR_MODULES) do table.insert(sortedMods, mod) end
-    table.sort(sortedMods, function(a, b) return a.order < b.order end)
+    -- Sort by saved order if available, fall back to static order
+    table.sort(sortedMods, function(a, b)
+        local oa = TakeMeHomeDB.infoBarSettings.modules[a.key] and TakeMeHomeDB.infoBarSettings.modules[a.key].order or a.order
+        local ob = TakeMeHomeDB.infoBarSettings.modules[b.key] and TakeMeHomeDB.infoBarSettings.modules[b.key].order or b.order
+        return oa < ob
+    end)
     for _, mod in ipairs(sortedMods) do
         local modBar = (TakeMeHomeDB.infoBarSettings.modules[mod.key] or {}).bar or "bottom"
         local barFrame = modBar == "top" and infoBarTop or infoBar
@@ -4711,10 +5400,136 @@ InitializeInfoBar = function()
     barHsBtn    = MakeQuickCastBtn(qcAnchor, qcGap * 2)
     barMountBtn = MakeQuickCastBtn(barHsBtn, qcGap)
     barHsBtn:SetAttribute("type", "item")
-    barMountBtn:SetAttribute("type", "spell")
+    -- Mount button: set attributes once at init — never set in UpdateInfoBar (combat blocked)
+    barMountBtn:SetAttribute("type",      "macro")
+    barMountBtn:SetAttribute("macrotext", "/run C_MountJournal.SummonByID(0)")
+    barMountBtn.icon:SetTexture("Interface\\Icons\\ability_mount_mountainram")
+    barMountBtn._tip  = "Summon Random Favourite Mount"
+    barMountBtn._tip2 = "Click to summon"
+    barMountBtn:Show()
 
     -- account for quick-cast buttons in left offset
     infoBarLeftOffset = infoBarLeftOffset + 2 * (qcSize + qcGap) + qcGap
+
+    -- ---- Minimap button collector dropdown ----
+    if TakeMeHomeDB.infoBarSettings and TakeMeHomeDB.infoBarSettings.minimapCollector then
+        local miniDD = CreateFrame("Frame", "TakeMeHomeMiniDropdown", UIParent, "BackdropTemplate")
+        miniDD:SetFrameStrata("TOOLTIP")
+        miniDD:SetBackdrop({
+            bgFile   = "Interface\\BUTTONS\\WHITE8X8",
+            edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+            edgeSize = 1,
+            insets   = { left = 1, right = 1, top = 1, bottom = 1 }
+        })
+        miniDD:SetBackdropColor(0.07, 0.07, 0.10, 0.97)
+        miniDD:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+        miniDD:EnableMouse(true)
+        miniDD:Hide()
+        miniDD:SetScript("OnLeave", function(self)
+            C_Timer.After(0.15, function()
+                if not self:IsMouseOver() then self:Hide() end
+            end)
+        end)
+
+        local miniIconSize = 24
+        local miniIconGap  = 4
+        local miniCols     = 6
+        local miniIconPool = {}  -- reused icon-button pool, indexed 1..N
+
+        local function GetOrCreateMiniIconBtn(i)
+            local b = miniIconPool[i]
+            if b then return b end
+            b = CreateFrame("Button", nil, miniDD)
+            b:SetSize(miniIconSize, miniIconSize)
+            b:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
+            local tex = b:CreateTexture(nil, "ARTWORK")
+            tex:SetAllPoints()
+            tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            b.tex = tex
+            local hl = b:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 1, 1, 0.3)
+            -- Forward clicks/tooltip to the real (hidden) minimap button
+            b:SetScript("OnClick", function(self, mouseButton)
+                if self.source then pcall(function() self.source:Click(mouseButton) end) end
+            end)
+            b:SetScript("OnEnter", function(self)
+                if not self.source then return end
+                local enterScript = self.source:GetScript("OnEnter")
+                if enterScript then
+                    pcall(enterScript, self.source)
+                    GameTooltip:ClearAllPoints()
+                    GameTooltip:SetPoint("BOTTOMRIGHT", self, "TOPLEFT", 0, 2)
+                end
+            end)
+            b:SetScript("OnLeave", function(self)
+                if self.source then
+                    local leaveScript = self.source:GetScript("OnLeave")
+                    if leaveScript then pcall(leaveScript, self.source) end
+                end
+                GameTooltip:Hide()
+            end)
+            miniIconPool[i] = b
+            return b
+        end
+
+        local function RebuildMiniDropdown()
+            local count = #MinimapCollector.buttons
+            local cols  = math.min(miniCols, math.max(count, 1))
+            local rows  = math.max(math.ceil(count / miniCols), 1)
+            miniDD:SetSize(
+                cols * miniIconSize + (cols - 1) * miniIconGap + 12,
+                rows * miniIconSize + (rows - 1) * miniIconGap + 12
+            )
+            for i, src in ipairs(MinimapCollector.buttons) do
+                local b = GetOrCreateMiniIconBtn(i)
+                b.source = src
+                b.tex:SetTexture(MinimapCollector.GetIcon(src))
+                local col = (i - 1) % miniCols
+                local row = math.floor((i - 1) / miniCols)
+                b:ClearAllPoints()
+                b:SetPoint("TOPLEFT", miniDD, "TOPLEFT", 6 + col * (miniIconSize + miniIconGap), -6 - row * (miniIconSize + miniIconGap))
+                b:Show()
+            end
+            for i = count + 1, #miniIconPool do
+                miniIconPool[i]:Hide()
+            end
+        end
+
+        -- Bar button that triggers the flyout
+        local miniBarBtn = CreateFrame("Button", nil, infoBar)
+        miniBarBtn:SetSize(qcSize, qcSize)
+        miniBarBtn:SetPoint("LEFT", barMountBtn, "RIGHT", qcGap * 2, 0)
+        local miniBtnTex = miniBarBtn:CreateTexture(nil, "ARTWORK")
+        miniBtnTex:SetAllPoints()
+        miniBtnTex:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+        miniBtnTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local miniBtnHL = miniBarBtn:CreateTexture(nil, "HIGHLIGHT")
+        miniBtnHL:SetAllPoints()
+        miniBtnHL:SetColorTexture(1, 1, 1, 0.3)
+
+        local function PositionAndShowMiniDD()
+            RebuildMiniDropdown()
+            miniDD:ClearAllPoints()
+            miniDD:SetPoint("BOTTOMLEFT", miniBarBtn, "TOPLEFT", 0, 2)
+            miniDD:Show()
+        end
+
+        miniBarBtn:SetScript("OnLeave", function()
+            C_Timer.After(0.15, function()
+                if not miniDD:IsMouseOver() then miniDD:Hide() end
+            end)
+        end)
+        miniBarBtn:SetScript("OnEnter", function(self)
+            PositionAndShowMiniDD()
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Minimap Buttons", 1, 1, 1)
+            GameTooltip:AddLine(#MinimapCollector.buttons .. " collected  |cff888888Hover to browse|r", 0.6, 0.6, 0.6)
+            GameTooltip:Show()
+        end)
+
+        infoBarLeftOffset = infoBarLeftOffset + qcSize + qcGap * 2
+    end
 
     -- Top bar cog button
     local topCog = CreateFrame("Button", nil, infoBarTop)
@@ -4736,6 +5551,365 @@ InitializeInfoBar = function()
     topCog:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     UpdateInfoBar()
+end
+
+-- ============================================
+-- TO DO LIST WINDOW
+-- ============================================
+-- All mutable todo state lives in one table to stay under the 200-local limit.
+local todo = { scope = "account", gPool = {}, tPool = {}, iPool = {}, gi = 0, ti = 0, ii = 0 }
+
+local function GetTodoData()
+    if not TakeMeHomeDB or not TakeMeHomeDB.todo then return nil end
+    if todo.scope == "account" then
+        return TakeMeHomeDB.todo.account
+    else
+        local ck = GetCharKey()
+        if not TakeMeHomeDB.todo.character[ck] then
+            TakeMeHomeDB.todo.character[ck] = { groups = {}, tasks = {}, nextGroupId = 1, nextTaskId = 1 }
+        end
+        return TakeMeHomeDB.todo.character[ck]
+    end
+end
+
+local function TodoNewGroup(name)
+    local d = GetTodoData(); if not d then return end
+    local id = d.nextGroupId; d.nextGroupId = id + 1
+    table.insert(d.groups, { id = id, name = name or "New Group", order = id, collapsed = false })
+end
+
+local function TodoAddTask(groupId, text)
+    local d = GetTodoData()
+    if not d or not text or text:trim() == "" then return end
+    local id = d.nextTaskId; d.nextTaskId = id + 1
+    table.insert(d.tasks, { id = id, groupId = groupId, text = text:trim(), done = false, order = id })
+end
+
+local function TodoDeleteGroup(groupId)
+    local d = GetTodoData(); if not d then return end
+    for i = #d.groups, 1, -1 do if d.groups[i].id == groupId then table.remove(d.groups, i) end end
+    for i = #d.tasks,  1, -1 do if d.tasks[i].groupId == groupId then table.remove(d.tasks, i) end end
+end
+
+local function TodoDeleteTask(taskId)
+    local d = GetTodoData(); if not d then return end
+    for i = #d.tasks, 1, -1 do if d.tasks[i].id == taskId then table.remove(d.tasks, i) end end
+end
+
+local function TodoToggleTask(taskId)
+    local d = GetTodoData(); if not d then return end
+    for _, t in ipairs(d.tasks) do if t.id == taskId then t.done = not t.done; return end end
+end
+
+local function TodoToggleGroup(groupId)
+    local d = GetTodoData(); if not d then return end
+    for _, g in ipairs(d.groups) do if g.id == groupId then g.collapsed = not g.collapsed; return end end
+end
+
+local function TodoRenameGroup(groupId, name)
+    local d = GetTodoData()
+    if not d or not name or name:trim() == "" then return end
+    for _, g in ipairs(d.groups) do if g.id == groupId then g.name = name:trim(); return end end
+end
+
+local function TodoEditTask(taskId, text)
+    local d = GetTodoData()
+    if not d or not text or text:trim() == "" then return end
+    for _, t in ipairs(d.tasks) do if t.id == taskId then t.text = text:trim(); return end end
+end
+
+-- ── Frame ─────────────────────────────────────────────────────
+todoFrame = CreateFrame("Frame", "TakeMeHomeTodoFrame", UIParent, "BackdropTemplate")
+todoFrame:SetSize(300, 450)
+todoFrame:SetPoint("CENTER", UIParent, "CENTER", 260, 0)
+todoFrame:SetMovable(true)
+todoFrame:EnableMouse(true)
+todoFrame:RegisterForDrag("LeftButton")
+todoFrame:SetClampedToScreen(true)
+todoFrame:SetFrameStrata("MEDIUM")
+todoFrame:Hide()
+todoFrame:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+todoFrame:SetBackdropColor(0.05, 0.05, 0.08, 0.95)
+todoFrame:SetBackdropBorderColor(0.3, 0.3, 0.35, 0.8)
+
+-- ── Banner (setup only — locals scoped inside do..end) ────────
+do
+    local banner = CreateFrame("Frame", nil, todoFrame)
+    banner:SetHeight(20)
+    banner:SetPoint("TOPLEFT",  todoFrame, "TOPLEFT",  1, -1)
+    banner:SetPoint("TOPRIGHT", todoFrame, "TOPRIGHT", -1, -1)
+    banner:EnableMouse(true); banner:RegisterForDrag("LeftButton")
+    local bg = banner:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints(); bg:SetColorTexture(0.12, 0.20, 0.50, 0.9)
+    local title = banner:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("LEFT", banner, "LEFT", 6, 0)
+    title:SetText("|cffd4af37To Do List|r")
+    local closeBtn = CreateFrame("Button", nil, banner)
+    closeBtn:SetSize(18, 18); closeBtn:SetPoint("RIGHT", banner, "RIGHT", -2, 0)
+    local cHL = closeBtn:CreateTexture(nil, "HIGHLIGHT")
+    cHL:SetAllPoints(); cHL:SetColorTexture(0.8, 0.2, 0.2, 0.5)
+    local closeFS = closeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    closeFS:SetAllPoints(); closeFS:SetText("|cffff8888×|r")
+    closeBtn:SetScript("OnClick", function() todoFrame:Hide() end)
+    banner:SetScript("OnDragStart", function() todoFrame:StartMoving() end)
+    banner:SetScript("OnDragStop", function()
+        todoFrame:StopMovingOrSizing()
+        local point, _, _, x, y = todoFrame:GetPoint()
+        if TakeMeHomeDB then TakeMeHomeDB.todoPosition = { point=point, x=x, y=y } end
+    end)
+end
+
+-- ── Tabs (stored in todo table) ───────────────────────────────
+do
+    local function makeTab(xOff, label)
+        local btn = CreateFrame("Button", nil, todoFrame, "BackdropTemplate")
+        btn:SetSize(110, 20)
+        btn:SetPoint("TOPLEFT", todoFrame, "TOPLEFT", xOff, -22)
+        btn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+        btn:SetBackdropColor(0.08, 0.08, 0.14, 0.9)
+        btn:SetBackdropBorderColor(0.25, 0.25, 0.35, 0.8)
+        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetAllPoints(); lbl:SetText(label)
+        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.12)
+        return btn
+    end
+    todo.tabAcc  = makeTab(1,   "Account")
+    todo.tabChar = makeTab(114, "Character")
+    local function refreshTabs()
+        if todo.scope == "account" then
+            todo.tabAcc:SetBackdropColor(0.15, 0.25, 0.55, 0.9)
+            todo.tabChar:SetBackdropColor(0.08, 0.08, 0.14, 0.9)
+        else
+            todo.tabAcc:SetBackdropColor(0.08, 0.08, 0.14, 0.9)
+            todo.tabChar:SetBackdropColor(0.15, 0.25, 0.55, 0.9)
+        end
+    end
+    todo.refreshTabs = refreshTabs
+    todo.tabAcc:SetScript("OnClick",  function() todo.scope = "account";   refreshTabs(); BuildTodoContent() end)
+    todo.tabChar:SetScript("OnClick", function() todo.scope = "character"; refreshTabs(); BuildTodoContent() end)
+end
+
+-- ── Scroll frame (stored in todo table) ──────────────────────
+do
+    local sf = CreateFrame("ScrollFrame", "TakeMeHomeTodoScroll", todoFrame, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT",     todoFrame, "TOPLEFT",     2, -44)
+    sf:SetPoint("BOTTOMRIGHT", todoFrame, "BOTTOMRIGHT", -26, 28)
+    local sc = CreateFrame("Frame", nil, sf)
+    sc:SetWidth(sf:GetWidth()); sc:SetHeight(10)
+    sf:SetScrollChild(sc)
+    todo.scroll  = sf
+    todo.content = sc
+    local hint = sc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("TOPLEFT", sc, "TOPLEFT", 10, -16)
+    hint:SetText("|cff888888Click '+ New Group' below to get started|r")
+    hint:Hide()
+    todo.hint = hint
+end
+
+-- ── New Group button (setup only) ────────────────────────────
+do
+    local btn = CreateFrame("Button", nil, todoFrame, "BackdropTemplate")
+    btn:SetHeight(24)
+    btn:SetPoint("BOTTOMLEFT",  todoFrame, "BOTTOMLEFT",  2, 2)
+    btn:SetPoint("BOTTOMRIGHT", todoFrame, "BOTTOMRIGHT", -2, 2)
+    btn:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+    btn:SetBackdropColor(0.05, 0.14, 0.05, 0.9)
+    btn:SetBackdropBorderColor(0.2, 0.48, 0.2, 0.9)
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetColorTexture(0.3, 0.7, 0.3, 0.18)
+    local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetAllPoints(); lbl:SetText("|cff88ff88+ New Group|r")
+    btn:SetScript("OnClick", function()
+        TodoNewGroup("New Group")
+        BuildTodoContent()
+        todo.scroll:SetVerticalScroll(todo.scroll:GetVerticalScrollRange())
+    end)
+end
+
+-- ── Pool helpers ──────────────────────────────────────────────
+local function ResetTodoPools()
+    for _, f in ipairs(todo.gPool) do f:Hide() end
+    for _, f in ipairs(todo.tPool) do f:Hide() end
+    for _, f in ipairs(todo.iPool) do f:Hide() end
+    todo.gi, todo.ti, todo.ii = 0, 0, 0
+end
+
+local function MakeTodoEB(parent, placeholder)
+    local eb = CreateFrame("EditBox", nil, parent)
+    eb:SetAutoFocus(false); eb:SetFontObject(GameFontNormalSmall); eb:SetMaxLetters(200)
+    eb.placeholder = placeholder or ""
+    eb:SetText(eb.placeholder); eb:SetTextColor(0.45, 0.45, 0.45)
+    eb:SetScript("OnEditFocusGained", function(self)
+        if self:GetText() == self.placeholder then self:SetText(""); self:SetTextColor(0.9, 0.9, 0.9) end
+    end)
+    eb:SetScript("OnEditFocusLost", function(self)
+        if self:GetText() == "" then self:SetText(self.placeholder); self:SetTextColor(0.45, 0.45, 0.45) end
+    end)
+    return eb
+end
+
+local function GetGroupFrame(idx)
+    if not todo.gPool[idx] then
+        local f = CreateFrame("Frame", nil, todo.content, "BackdropTemplate")
+        f:SetHeight(22)
+        f:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+        f:SetBackdropColor(0.10, 0.10, 0.20, 0.9)
+        f:SetBackdropBorderColor(0.28, 0.28, 0.50, 0.8)
+        f.colBtn = CreateFrame("Button", nil, f)
+        f.colBtn:SetSize(18, 18); f.colBtn:SetPoint("LEFT", f, "LEFT", 3, 0)
+        f.colFS = f.colBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.colFS:SetAllPoints()
+        local colHL = f.colBtn:CreateTexture(nil, "HIGHLIGHT")
+        colHL:SetAllPoints(); colHL:SetColorTexture(1, 1, 1, 0.1)
+        f.nameEB = MakeTodoEB(f, "Group Name")
+        f.nameEB:SetHeight(18)
+        f.nameEB:SetPoint("LEFT", f.colBtn, "RIGHT", 3, 0); f.nameEB:SetPoint("RIGHT", f, "RIGHT", -22, 0)
+        f.nameEB:SetTextColor(1, 0.85, 0.4)
+        f.delBtn = CreateFrame("Button", nil, f)
+        f.delBtn:SetSize(18, 18); f.delBtn:SetPoint("RIGHT", f, "RIGHT", -2, 0)
+        local dHL = f.delBtn:CreateTexture(nil, "HIGHLIGHT")
+        dHL:SetAllPoints(); dHL:SetColorTexture(0.8, 0.2, 0.2, 0.45)
+        f.delFS = f.delBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        f.delFS:SetAllPoints(); f.delFS:SetText("|cffff6666x|r")
+        todo.gPool[idx] = f
+    end
+    local f = todo.gPool[idx]; f:SetParent(todo.content); f:ClearAllPoints(); f:Show()
+    return f
+end
+
+local function GetTaskFrame(idx)
+    if not todo.tPool[idx] then
+        local f = CreateFrame("Frame", nil, todo.content)
+        f:SetHeight(20)
+        f.chkBtn = CreateFrame("Button", nil, f)
+        f.chkBtn:SetSize(14, 14); f.chkBtn:SetPoint("LEFT", f, "LEFT", 16, 0)
+        f.chkBg = f.chkBtn:CreateTexture(nil, "BACKGROUND"); f.chkBg:SetAllPoints()
+        local cHL = f.chkBtn:CreateTexture(nil, "HIGHLIGHT")
+        cHL:SetAllPoints(); cHL:SetColorTexture(1, 1, 1, 0.25)
+        f.chkMark = f.chkBtn:CreateTexture(nil, "ARTWORK")
+        f.chkMark:SetSize(10, 10); f.chkMark:SetPoint("CENTER")
+        f.chkMark:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+        f.chkMark:SetVertexColor(0.4, 1, 0.4)
+        f.textEB = MakeTodoEB(f, "")
+        f.textEB:SetHeight(18)
+        f.textEB:SetPoint("LEFT", f.chkBtn, "RIGHT", 4, 0); f.textEB:SetPoint("RIGHT", f, "RIGHT", -22, 0)
+        f.delBtn = CreateFrame("Button", nil, f)
+        f.delBtn:SetSize(18, 18); f.delBtn:SetPoint("RIGHT", f, "RIGHT", -2, 0)
+        local dHL2 = f.delBtn:CreateTexture(nil, "HIGHLIGHT")
+        dHL2:SetAllPoints(); dHL2:SetColorTexture(0.8, 0.2, 0.2, 0.45)
+        f.delFS = f.delBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        f.delFS:SetAllPoints(); f.delFS:SetText("|cffff6666x|r")
+        todo.tPool[idx] = f
+    end
+    local f = todo.tPool[idx]; f:SetParent(todo.content); f:ClearAllPoints(); f:Show()
+    return f
+end
+
+local function GetInputFrame(idx)
+    if not todo.iPool[idx] then
+        local f = CreateFrame("Frame", nil, todo.content, "BackdropTemplate")
+        f:SetHeight(22)
+        f:SetBackdrop({ bgFile="Interface\\BUTTONS\\WHITE8X8", edgeFile="Interface\\BUTTONS\\WHITE8X8", edgeSize=1, insets={left=1,right=1,top=1,bottom=1} })
+        f:SetBackdropColor(0.04, 0.08, 0.04, 0.7); f:SetBackdropBorderColor(0.15, 0.35, 0.15, 0.6)
+        local plusFS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        plusFS:SetPoint("LEFT", f, "LEFT", 18, 0); plusFS:SetText("|cff88ff88+|r")
+        f.eb = MakeTodoEB(f, "Add a task...")
+        f.eb:SetHeight(18)
+        f.eb:SetPoint("LEFT", f, "LEFT", 34, 0); f.eb:SetPoint("RIGHT", f, "RIGHT", -6, 0)
+        todo.iPool[idx] = f
+    end
+    local f = todo.iPool[idx]; f:SetParent(todo.content); f:ClearAllPoints(); f:Show()
+    return f
+end
+
+-- ── Main rebuild ──────────────────────────────────────────────
+BuildTodoContent = function()
+    if todo.refreshTabs then todo.refreshTabs() end
+    ResetTodoPools()
+    todo.hint:Hide()
+    local data = GetTodoData()
+    if not data then return end
+
+    todo.content:SetWidth(todo.scroll:GetWidth() - 2)
+
+    local groups = {}
+    for _, g in ipairs(data.groups) do table.insert(groups, g) end
+    table.sort(groups, function(a, b) return a.order < b.order end)
+
+    if #groups == 0 then
+        todo.hint:Show(); todo.content:SetHeight(50); return
+    end
+
+    local PAD = 4
+    local y   = -4
+
+    for _, group in ipairs(groups) do
+        local gid = group.id
+        todo.gi = todo.gi + 1
+        local gf = GetGroupFrame(todo.gi)
+        gf:SetPoint("TOPLEFT",  todo.content, "TOPLEFT",  PAD,  y)
+        gf:SetPoint("TOPRIGHT", todo.content, "TOPRIGHT", -PAD, y)
+        gf.colFS:SetText(group.collapsed and "|cffaaaaaa[+]|r" or "|cffaaaaaa[-]|r")
+        gf.nameEB:SetText(group.name); gf.nameEB:SetTextColor(1, 0.85, 0.4)
+        gf.colBtn:SetScript("OnClick", function() TodoToggleGroup(gid); BuildTodoContent() end)
+        gf.nameEB:SetScript("OnEnterPressed", function(self)
+            TodoRenameGroup(gid, self:GetText()); self:ClearFocus(); BuildTodoContent()
+        end)
+        gf.nameEB:SetScript("OnEscapePressed", function(self) self:SetText(group.name); self:ClearFocus() end)
+        gf.delBtn:SetScript("OnClick", function() TodoDeleteGroup(gid); BuildTodoContent() end)
+        gf.delBtn:SetScript("OnEnter", function(s)
+            GameTooltip:SetOwner(s, "ANCHOR_TOP")
+            GameTooltip:SetText("Delete group and all its tasks", 1, 0.4, 0.4); GameTooltip:Show()
+        end)
+        gf.delBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        y = y - 24
+
+        if not group.collapsed then
+            local tasks = {}
+            for _, t in ipairs(data.tasks) do
+                if t.groupId == gid then table.insert(tasks, t) end
+            end
+            table.sort(tasks, function(a, b) return a.order < b.order end)
+
+            for _, task in ipairs(tasks) do
+                local tid = task.id
+                todo.ti = todo.ti + 1
+                local tf = GetTaskFrame(todo.ti)
+                tf:SetPoint("TOPLEFT",  todo.content, "TOPLEFT",  PAD, y)
+                tf:SetPoint("TOPRIGHT", todo.content, "TOPRIGHT", -PAD, y)
+                tf.chkMark:SetShown(task.done)
+                tf.chkBg:SetColorTexture(task.done and 0.15 or 0.3, task.done and 0.5 or 0.3, task.done and 0.15 or 0.3, 0.7)
+                tf.textEB:SetText(task.text)
+                tf.textEB:SetTextColor(task.done and 0.45 or 0.9, task.done and 0.45 or 0.9, task.done and 0.45 or 0.9)
+                tf.chkBtn:SetScript("OnClick", function() TodoToggleTask(tid); BuildTodoContent() end)
+                tf.textEB:SetScript("OnEnterPressed", function(self)
+                    TodoEditTask(tid, self:GetText()); self:ClearFocus(); BuildTodoContent()
+                end)
+                tf.textEB:SetScript("OnEscapePressed", function(self) self:SetText(task.text); self:ClearFocus() end)
+                tf.delBtn:SetScript("OnClick", function() TodoDeleteTask(tid); BuildTodoContent() end)
+                y = y - 22
+            end
+
+            todo.ii = todo.ii + 1
+            local inf = GetInputFrame(todo.ii)
+            inf:SetPoint("TOPLEFT",  todo.content, "TOPLEFT",  PAD, y)
+            inf:SetPoint("TOPRIGHT", todo.content, "TOPRIGHT", -PAD, y)
+            inf.eb:SetText("Add a task..."); inf.eb:SetTextColor(0.45, 0.45, 0.45)
+            inf.eb:SetScript("OnEnterPressed", function(self)
+                local txt = self:GetText()
+                if txt ~= "" and txt ~= "Add a task..." then
+                    TodoAddTask(gid, txt); BuildTodoContent()
+                else
+                    self:ClearFocus()
+                end
+            end)
+            inf.eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+            y = y - 26
+        end
+        y = y - 6
+    end
+
+    todo.content:SetHeight(math.max(50, math.abs(y) + 8))
 end
 
 -- ============================================
@@ -4803,13 +5977,16 @@ minimapButton:SetScript("OnClick", function(self, button)
     if button == "LeftButton" then
         -- Toggle all windows based on tracked state
         if userWantsWindowsVisible then
+            local todoWasOpen = todoFrame:IsShown()
             mainFrame:Hide()
             professionFrame:Hide()
             mountsFrame:Hide()
             functionFrame:Hide()
             missionFrame:Hide()
+            todoFrame:Hide()
             infoBar:Hide()
             userWantsWindowsVisible = false
+            windowHiddenByBar["_todoWasOpen"] = todoWasOpen
         else
             userWantsWindowsVisible = true
             if not windowHiddenByBar["main"]        then mainFrame:Show()       end
@@ -4817,6 +5994,8 @@ minimapButton:SetScript("OnClick", function(self, button)
             if not windowHiddenByBar["mounts"]      then mountsFrame:Show()     end
             if not windowHiddenByBar["function"]    then functionFrame:Show()   end
             if not windowHiddenByBar["missions"]    then missionFrame:Show()    end
+            if windowHiddenByBar["_todoWasOpen"] then todoFrame:Show(); BuildTodoContent() end
+            windowHiddenByBar["_todoWasOpen"] = nil
             UpdateInfoBar()
         end
     elseif button == "RightButton" then
@@ -4865,6 +6044,7 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         UpdateProfDragBanner()
         UpdateMountsDragBanner()
         UpdateFuncDragBanner()
+        UpdateMissionDragBanner()
         print("|cff00ff00TakeMeHome|r: Windows locked.")
     elseif cmd == "unlock" then
         TakeMeHomeDB.locked = false
@@ -4872,6 +6052,7 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         UpdateProfDragBanner()
         UpdateMountsDragBanner()
         UpdateFuncDragBanner()
+        UpdateMissionDragBanner()
         print("|cff00ff00TakeMeHome|r: Windows unlocked. Drag to move.")
     elseif cmd == "reset" then
         TakeMeHomeDB.position = { point = "CENTER", x = 0, y = 0 }
@@ -4931,6 +6112,13 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         functionFrame:ClearAllPoints()
         functionFrame:SetPoint("CENTER", 0, -100)
         print("|cff00ff00TakeMeHome|r: Function position reset.")
+    elseif cmd == "todo" then
+        if todoFrame:IsShown() then
+            todoFrame:Hide()
+        else
+            todoFrame:Show()
+            BuildTodoContent()
+        end
     elseif cmd == "attdebug" then
         if not C_AddOns.IsAddOnLoaded("AllTheThings") then
             print("|cff00ff00TakeMeHome|r: AllTheThings is not loaded.")
@@ -5039,20 +6227,13 @@ SlashCmdList["TAKEMEHOME"] = function(msg)
         CreateConfigPanel()
     else
         print("|cff00ff00TakeMeHome|r Commands:")
-        print("  |cff00ffff/tmh|r - Toggle hearthstone window")
-        print("  |cff00ffff/tmh show|r - Show hearthstone window")
-        print("  |cff00ffff/tmh hide|r - Hide hearthstone window")
-        print("  |cff00ffff/tmh prof|r - Toggle professions window")
-        print("  |cff00ffff/tmh prof show|r - Show professions window")
-        print("  |cff00ffff/tmh prof hide|r - Hide professions window")
-        print("  |cff00ffff/tmh prof reset|r - Reset professions position")
-        print("  |cff00ffff/tmh func|r - Toggle function window")
-        print("  |cff00ffff/tmh func show|r - Show function window")
-        print("  |cff00ffff/tmh func hide|r - Hide function window")
-        print("  |cff00ffff/tmh func reset|r - Reset function position")
-        print("  |cff00ffff/tmh lock|r - Lock all window positions")
-        print("  |cff00ffff/tmh unlock|r - Unlock all windows (allow dragging)")
-        print("  |cff00ffff/tmh reset|r - Reset all windows to center")
+        print("  |cff00ffff/tmh|r - Toggle Travel window")
+        print("  |cff00ffff/tmh show|r / |cff00ffff/tmh hide|r - Show / hide Travel window")
+        print("  |cff00ffff/tmh prof|r - Toggle Professions window")
+        print("  |cff00ffff/tmh func|r - Toggle Function window")
+        print("  |cff00ffff/tmh todo|r - Toggle To Do List")
+        print("  |cff00ffff/tmh lock|r / |cff00ffff/tmh unlock|r - Lock / unlock all windows")
+        print("  |cff00ffff/tmh reset|r - Reset all windows to centre")
         print("  |cff00ffff/tmh config|r - Open settings panel")
     end
 end

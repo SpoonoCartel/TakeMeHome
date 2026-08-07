@@ -1,5 +1,28 @@
 # TakeMeHome Changelog
 
+## [2.5.0] - 2026-08-07
+### Added
+- **To Do List window** — a new draggable window (toggle via the info bar or the window-toggle icons) for tracking tasks, with separate **Account** and **Character** tabs; organize tasks into collapsible, renameable groups; add, edit, check off, and delete tasks freely; a **Todo Count** bar module shows pending/done counts for both account and character scope, with a full breakdown in its tooltip and a click to open the window
+- **Time Played module** — tracks how long you've played each character, refreshed from the server at login and every 10 minutes; bar shows a live-updating total (e.g. `Played 12d 4h`); tooltip breaks down this character's total and time-at-current-level, then lists every character's played time (class-coloured, richest-first), a **Total by class** rollup, and an account grand total
+- **Minimap Button Collector** (opt-in, off by default in Settings → Info Bar) — sweeps other addons' minimap icon buttons off the minimap and into a single icon on the bottom bar; hover it to browse a flyout grid of everything collected, click any icon to trigger that addon's real button exactly as if you'd clicked it on the minimap
+- **Interface 12.1 (120100)** added to the multi-interface TOC line, alongside the existing 12.0.x entries, so the addon keeps loading across the 12.0 → 12.1 transition
+
+### Fixed
+- Info bar modules with only a left-click action (no right-click) never actually responded to clicks — `RegisterForClicks` was never called for that case, so `OnClick` was set but never fired
+- Clicking a module's L/C/R section-cycle button in Settings → Info Bar threw a Lua error (`bad argument #1 to 'ipairs'`) because two of the button lists it referenced were declared later in the file than the code that closed over them, putting them out of lexical scope
+
+## [2.4.2] - 2026-06-12
+### Added
+- **Warband Bank gold** included in the Warband Gold module — the shared account-wide gold pool in the Warband Bank is now tracked via `C_Bank.FetchDepositedMoney(Enum.BankType.Account)` and the `ACCOUNT_MONEY` event; the bar total and tooltip grand total both include it; the tooltip shows it as a separate `Warband Bank` line (in blue) between the per-character list and the overall total
+
+## [2.4.1] - 2026-06-12
+### Added
+- **Daily Gold module** — tracks how much gold your character has made or lost since midnight; bar shows `Day +5g 23s` (green) or `Day -200g` (red); resets automatically when the calendar date changes on next login; tooltip shows full g/s/c breakdown and what you started the day with
+- **Warband Gold module** — shows combined total gold across every character on your account that has ever logged in with the addon; bar shows formatted total; tooltip lists each character by name in their class colour, sorted richest first, with a total line at the bottom; characters on a different realm display the realm name; gold is stored account-wide and updated live whenever your gold changes
+
+### Fixed
+- **Session Gold** was always blank — `sessionGoldStart` was declared but never assigned; it is now correctly set to your current gold at login
+
 ## [2.4.0] - 2026-06-04
 ### Added
 - **Rich tooltips** on all info bar modules — hover any module for a detailed breakdown:

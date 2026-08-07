@@ -1,8 +1,8 @@
-## Interface: 120007, 120001, 120000
+## Interface: 120100, 120007, 120001, 120000
 ## Title: TakeMeHome
 ## Notes: Quick access to Hearthstones and travel options in a movable window
 ## Author: SpoonoTV
-## Version: 2.4.0
+## Version: 2.5.0
 ## SavedVariables: TakeMeHomeDB
 
 TakeMeHome.lua

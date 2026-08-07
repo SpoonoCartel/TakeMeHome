@@ -7,7 +7,7 @@ A World of Warcraft addon by **SpoonoTV** that started as a quick hearthstone la
 ## Features
 
 ### Floating Windows
-Five movable, lockable windows with drag-to-snap and group-linking:
+Movable, lockable windows with drag-to-snap and group-linking:
 
 | Window | Contents |
 |---|---|
@@ -16,6 +16,7 @@ Five movable, lockable windows with drag-to-snap and group-linking:
 | **Mounts** | Up to 6 user-selected mounts + Druid Travel Form |
 | **Function** | Logout button |
 | **Missions** | WoD / Legion / BfA / Shadowlands mission table launchers |
+| **To Do List** | Account and Character task lists, organized into collapsible groups — add, edit, check off, and delete tasks freely |
 
 **Window features:**
 - Drag within 20px of another window to auto-snap and link — linked windows move together
@@ -41,8 +42,12 @@ A persistent full-width bar docked to the **bottom** and/or **top** of the scree
 - Durability — lowest equipped item %, colour-coded
 - XP — progress % (hidden at max level)
 - Session Gold — net +/- since login
+- Daily Gold — net +/- since midnight, resets automatically each day
+- Warband Gold — combined gold across every character on your account, including Warband Bank
 - Currency — watched currency with cap colour-coding
 - Keystone — owned Mythic+ key level and dungeon name
+- Todo Count — pending/done task counts for account and character scope
+- Played Time — live-updating total time played on this character
 
 **Right section (system):**
 - FPS — colour-coded by performance
@@ -56,6 +61,7 @@ A persistent full-width bar docked to the **bottom** and/or **top** of the scree
 - ATT button — All The Things expansion dropdown (if ATT is loaded)
 - Quick-cast HS — smart hearthstone button; picks the item with the shortest cooldown; shows a cooldown swipe
 - Quick-cast Mount — summons a random favourite mount from your journal
+- Minimap Button Collector *(opt-in, Settings → Info Bar)* — sweeps other addons' minimap icon buttons off the minimap; hover the icon to browse a flyout grid and click any icon to trigger that addon's real button
 
 **Bottom bar extras (right of modules):**
 - Notification dots — yellow = unread mail, green = LFG queue active, blue = pending calendar invite; each clickable
@@ -78,6 +84,10 @@ Hovering any bar module shows a detailed breakdown:
 | Spec | All specs listed, current one marked |
 | Item Level | Equipped vs overall split |
 | Keystone | Full dungeon name and key level |
+| Daily Gold | Full breakdown and what you started the day with |
+| Warband Gold | Every character's gold (class-coloured, richest first) plus Warband Bank and grand total |
+| Todo Count | Pending/done breakdown for account and character |
+| Played Time | This character's total and time-at-level, every character's played time by class, and an account grand total |
 
 ---
 
@@ -86,7 +96,7 @@ Opens via `/tmh config`, the minimap right-click menu, or the cog on either bar.
 
 Seven sidebar sections:
 - **General** — window scale slider, lock positions, snap toggle, reset all
-- **Info Bar** — enable/disable each bar, per-module enable + Bot/Top bar assignment, ATT toggle
+- **Info Bar** — enable/disable each bar, per-module enable + Bot/Top bar assignment, ATT toggle, Minimap Button Collector toggle
 - **Travel** — enable/reorder hearthstone and utility buttons
 - **Professions** — enable/reorder profession buttons
 - **Mounts** — add/remove mounts from the window
@@ -111,6 +121,7 @@ TakeMeHomeExternalData["myKey"] = "63.8%"
 | `/tmh show` / `hide` | Show / hide Travel window |
 | `/tmh prof` | Toggle Professions window |
 | `/tmh func` | Toggle Function window |
+| `/tmh todo` | Toggle To Do List window |
 | `/tmh lock` / `unlock` | Lock / unlock all window positions |
 | `/tmh reset` | Reset all windows to centre |
 | `/tmh config` | Open settings panel |
@@ -134,4 +145,4 @@ TakeMeHomeExternalData["myKey"] = "63.8%"
 ## Version History
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-Current version: **2.4.0**
+Current version: **2.5.0**
