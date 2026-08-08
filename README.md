@@ -17,6 +17,7 @@ Movable, lockable windows with drag-to-snap and group-linking:
 | **Function** | Logout button |
 | **Missions** | WoD / Legion / BfA / Shadowlands mission table launchers |
 | **To Do List** | Account and Character task lists, organized into collapsible groups — add, edit, check off, and delete tasks freely |
+| **Time Played** | Bar chart of played time, with **By Class** and **By Character** tabs — class-coloured bars, sorted highest first, with an account-total footer |
 
 **Window features:**
 - Drag within 20px of another window to auto-snap and link — linked windows move together
@@ -92,16 +93,16 @@ Hovering any bar module shows a detailed breakdown:
 ---
 
 ### Settings Panel
-Opens via `/tmh config`, the minimap right-click menu, or the cog on either bar.
+Opens via `/tmh config`, the minimap right-click menu, or the cog on either bar. A modern dark UI with a gold-yellow accent, pill toggle switches, and grouped section labels throughout.
 
 Seven sidebar sections:
 - **General** — window scale slider, lock positions, snap toggle, reset all
 - **Info Bar** — enable/disable each bar, per-module enable + Bot/Top bar assignment, ATT toggle, Minimap Button Collector toggle
 - **Travel** — enable/reorder hearthstone and utility buttons
-- **Professions** — enable/reorder profession buttons
-- **Mounts** — add/remove mounts from the window
+- **Professions** — enable/reorder profession buttons, adjustable buttons-per-row
+- **Mounts** — add/remove mounts from the window, adjustable buttons-per-row
 - **Function** — enable/reorder function buttons
-- **Missions** — enable/reorder mission table buttons
+- **Missions** — enable/reorder mission table buttons, adjustable buttons-per-row
 
 ---
 
@@ -122,6 +123,7 @@ TakeMeHomeExternalData["myKey"] = "63.8%"
 | `/tmh prof` | Toggle Professions window |
 | `/tmh func` | Toggle Function window |
 | `/tmh todo` | Toggle To Do List window |
+| `/tmh playtime` | Toggle Time Played window |
 | `/tmh lock` / `unlock` | Lock / unlock all window positions |
 | `/tmh reset` | Reset all windows to centre |
 | `/tmh config` | Open settings panel |
@@ -145,4 +147,4 @@ TakeMeHomeExternalData["myKey"] = "63.8%"
 ## Version History
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-Current version: **2.5.0**
+Current version: **2.6.0**

@@ -1,5 +1,11 @@
 # TakeMeHome Changelog
 
+## [2.6.0] - 2026-08-08
+### Added
+- **Settings panel redesign** — the whole config window has moved to a modern dark UI with a gold-yellow accent, pill-style toggle switches instead of checkboxes, uppercase section labels grouping related fields, and a subtle glow strip under each section header; the sidebar's active tab now shows a left accent bar and dimmed inactive icons instead of a flat colour fill
+- **Time Played graph window** — a new pop-out window (toggle via its own bar icon or by clicking the Played Time bar module) showing a bar chart of your played time, with **By Class** and **By Character** tabs; each bar uses the real class colour, sorted highest first, with an account-total footer
+- **Configurable button grid** for the Professions, Mounts, and Missions windows — a new "Buttons per row" slider in each window's settings section lets you choose the column count (row count still follows automatically); changes apply live, no reload needed
+
 ## [2.5.0] - 2026-08-07
 ### Added
 - **To Do List window** — a new draggable window (toggle via the info bar or the window-toggle icons) for tracking tasks, with separate **Account** and **Character** tabs; organize tasks into collapsible, renameable groups; add, edit, check off, and delete tasks freely; a **Todo Count** bar module shows pending/done counts for both account and character scope, with a full breakdown in its tooltip and a click to open the window
